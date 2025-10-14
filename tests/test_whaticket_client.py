@@ -92,3 +92,46 @@ def test_invalid_json_returns_text(monkeypatch):
 
     message_id = client.send_text("5511999999999", "olá")
     assert message_id == "ok"
+
+
+def test_send_media_success(monkeypatch):
+    client = WhaticketClient(DummyRedis())
+
+    def fake_post(url, headers, json, timeout):
+        assert json["mediaUrl"] == "http://example.com/img.jpg"
+        assert json["mediaType"] == "image"
+        return DummyResponse(status_code=200, json_body={"id": "media-1"})
+
+    monkeypatch.setattr(requests, "post", fake_post)
+
+    message_id = client.send_media(
+        "5511999999999",
+        "http://example.com/img.jpg",
+        caption="Foto",
+        media_type="image",
+    )
+    assert message_id == "media-1"
+
+
+def test_jwt_authentication_is_cached(monkeypatch):
+    redis_client = DummyRedis()
+    client = WhaticketClient(redis_client)
+    monkeypatch.setattr(settings, "enable_jwt_login", True)
+    monkeypatch.setattr(settings, "whaticket_jwt_email", "agent@test.io")
+    monkeypatch.setattr(settings, "whaticket_jwt_password", "secret")
+    monkeypatch.setattr(settings, "whatsapp_api_url", "http://test/api/messages/send")
+
+    def fake_login(*args, **kwargs):
+        return DummyResponse(status_code=200, json_body={"token": "abc", "expiresIn": 600})
+
+    monkeypatch.setattr(requests, "post", fake_login)
+
+    token_first = client._get_auth_token()
+    assert token_first == "abc"
+
+    def fail_login(*args, **kwargs):
+        raise AssertionError("login should not be called after caching")
+
+    monkeypatch.setattr(requests, "post", fail_login)
+    token_cached = client._get_auth_token()
+    assert token_cached == "abc"

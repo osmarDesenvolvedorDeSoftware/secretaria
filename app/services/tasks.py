@@ -5,14 +5,17 @@ import time
 
 import structlog
 from redis import Redis
-from rq import Queue, Retry
+from rq import Queue, Retry, get_current_job
 
 from app.metrics import (
     llm_errors,
     llm_latency,
+    llm_prompt_injection_blocked_total,
     task_latency_histogram,
     whaticket_errors,
     whaticket_latency,
+    whaticket_send_retry_total,
+    whaticket_send_success_total,
 )
 from app.config import settings
 from app.services.llm import LLMClient
@@ -38,7 +41,13 @@ class TaskService:
 
     def enqueue(self, number: str, body: str, kind: str, correlation_id: str) -> None:
         delays = list(settings.rq_retry_delays)
-        retry = Retry(max=len(delays), interval=delays) if delays else None
+        retry: Retry | None = None
+        max_retries = max(settings.rq_retry_max_attempts, 0)
+        if max_retries > 0:
+            if delays:
+                retry = Retry(max=max_retries, interval=delays)
+            else:
+                retry = Retry(max=max_retries)
         enqueue_kwargs = {}
         if retry:
             enqueue_kwargs["retry"] = retry
@@ -86,6 +95,15 @@ def process_incoming_message(number: str, body: str, kind: str, correlation_id: 
     queue = current_app.task_queue  # type: ignore[attr-defined]
     service = TaskService(redis_client, session_factory, queue)
 
+    job = get_current_job()
+    attempt = 1
+    if job is not None:
+        attempt = int(job.meta.get("attempt", 0)) + 1
+        job.meta["attempt"] = attempt
+        job.save_meta()
+        logger = logger.bind(job_id=job.id, attempt=attempt, retries_left=job.retries_left)
+    max_attempts = max(len(settings.rq_retry_delays) + 1, settings.rq_retry_max_attempts + 1)
+
     with structlog.contextvars.bound_contextvars(correlation_id=correlation_id):
         try:
             sanitized = sanitize_text(body)
@@ -94,6 +112,7 @@ def process_incoming_message(number: str, body: str, kind: str, correlation_id: 
                 final_message = "Desculpe, não posso executar esse tipo de comando."
                 user_message = sanitized
                 context_messages = service.get_context(number)
+                llm_prompt_injection_blocked_total.inc()
             else:
                 context_messages = service.get_context(number)
                 user_message = sanitized
@@ -115,29 +134,35 @@ def process_incoming_message(number: str, body: str, kind: str, correlation_id: 
             external_id = None
             success = False
             error_detail = None
+            delivery_status = "FAILED_TEMPORARY"
             try:
                 external_id = service.whaticket_client.send_text(number, final_message)
                 whaticket_latency.observe(time.time() - whaticket_start)
                 success = True
+                delivery_status = "SENT"
+                whaticket_send_success_total.inc()
             except WhaticketError as exc:
                 error_detail = sanitize_for_log(str(exc))
                 logger.exception("whaticket_failure", error=error_detail)
                 whaticket_errors.inc()
                 whaticket_latency.observe(time.time() - whaticket_start)
                 if exc.retryable:
-                    queue.enqueue(
-                        process_incoming_message,
-                        number,
-                        body,
-                        kind,
-                        correlation_id,
-                    )
+                    whaticket_send_retry_total.inc()
+                    if job is not None and job.retries_left == 0:
+                        delivery_status = "FAILED_PERMANENT"
+                    elif attempt >= max_attempts:
+                        delivery_status = "FAILED_PERMANENT"
+                    else:
+                        delivery_status = "FAILED_TEMPORARY"
+                else:
+                    delivery_status = "FAILED_PERMANENT"
                 raise
             except Exception as exc:
                 error_detail = sanitize_for_log(str(exc))
                 logger.exception("whaticket_failure_unexpected", error=error_detail)
                 whaticket_errors.inc()
                 whaticket_latency.observe(time.time() - whaticket_start)
+                delivery_status = "FAILED_PERMANENT"
                 raise
             finally:
                 session = session_factory()  # type: ignore[operator]
@@ -155,7 +180,7 @@ def process_incoming_message(number: str, body: str, kind: str, correlation_id: 
                             session,
                             number,
                             final_message,
-                            "FAILED",
+                            delivery_status,
                             external_id,
                             error_detail,
                         )

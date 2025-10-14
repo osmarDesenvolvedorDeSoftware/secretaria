@@ -102,9 +102,38 @@ Envie o payload em até ±300 segundos do `X-Timestamp` informado para evitar re
 }
 ```
 
+## Healthcheck Profundo
+
+O endpoint `GET /healthz` só retorna `200 OK` quando **todas** as dependências respondem dentro da janela esperada:
+
+* PostgreSQL: `SELECT 1` via SQLAlchemy.
+* Redis: comando `PING`.
+* Worker RQ: presença de heartbeat válido (`rq:workers` + `last_heartbeat`).
+
+O JSON de resposta inclui a latência média de cada chamada (`latency_ms`), quantidade de workers visíveis e o timestamp em UTC. Em caso de falha, o status HTTP é `503` e a métrica `secretaria_healthcheck_failures_total{component="..."}` é incrementada.
+
 ## Métricas
 
-Expostas em `/metrics` no formato Prometheus. Inclui contadores de webhooks aceitos/rejeitados, histogramas de latência (LLM, Whaticket, processamento) e gauge da fila RQ.
+Expostas em `/metrics` no formato Prometheus com `HELP`/`TYPE` padrão. Destaques:
+
+* `secretaria_webhook_received_total{status="accepted|rejected"}`
+* `secretaria_task_latency_seconds`
+* `secretaria_whaticket_latency_seconds`
+* `secretaria_whaticket_errors_total`
+* `secretaria_whaticket_send_success_total`
+* `secretaria_whaticket_send_retry_total`
+* `secretaria_llm_latency_seconds`
+* `secretaria_llm_errors_total`
+* `secretaria_llm_prompt_injection_blocked_total`
+* `secretaria_healthcheck_failures_total{component="redis|postgres|rq_worker"}`
+* `secretaria_queue_size`
+
+### Exemplos `curl`
+
+```bash
+curl -s http://localhost:8080/metrics | grep secretaria_whaticket_send
+curl -s http://localhost:8080/metrics | grep secretaria_healthcheck_failures_total
+```
 
 ## Estrutura de Pastas
 
@@ -118,12 +147,28 @@ Veja a árvore completa no repositório para entender os módulos de rotas, serv
 ## Testes
 
 ```bash
-pytest -v --maxfail=1 --disable-warnings
+pytest -v --maxfail=1 --disable-warnings --cov=app --cov-report=term-missing
 make up
-curl -i http://localhost:8080/healthz
+curl -s http://localhost:8080/healthz | jq
 ```
 
-Os testes cobrem o parsing completo do payload, a proteção HMAC com `X-Timestamp` anti-replay, o cliente Whaticket com retries, sanitização de logs, bloqueio de prompt-injection e o fluxo end-to-end do webhook com enfileiramento no Redis.
+Os testes cobrem o parsing completo do payload, a proteção HMAC com `X-Timestamp` anti-replay, o cliente Whaticket com retries, sanitização de logs, bloqueio de prompt-injection, métricas/healthcheck e o fluxo end-to-end do webhook com enfileiramento no Redis.
+
+## Política de Retentativas
+
+* **Fila RQ:** cada mensagem é executada até 1 tentativa inicial + 5 re-tentativas automáticas.
+* **Backoff progressivo:** 5s → 15s → 45s → 90s → 90s (padrão do RQ quando a lista termina).
+* **Registro:** a métrica `secretaria_whaticket_send_retry_total` aumenta a cada re-tentativa.
+* **Persistência:** falhas com retries disponíveis são registradas como `FAILED_TEMPORARY`; quando os limites se esgotam ou a falha não é re-tentável, o log é `FAILED_PERMANENT`.
+
+## Validação em Staging
+
+1. `docker compose -f docker/docker-compose.yml up -d`
+2. `alembic upgrade head`
+3. Executar `pytest -v --maxfail=1 --disable-warnings --cov=app --cov-report=term-missing`
+4. Validar `/healthz` e `/metrics` (`curl -s http://localhost:8080/healthz | jq`)
+5. Conferir métricas chave no Prometheus/Grafana e alarmes ativos
+6. Enviar payload de teste pelo webhook para validar fila + entrega real
 
 ## Docker
 

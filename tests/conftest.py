@@ -18,6 +18,9 @@ class DummyRedis:
     def __init__(self):
         self.storage: dict[str, Any] = {}
         self.zsets: dict[str, list[float]] = {}
+        self.sets: dict[str, set[str]] = {}
+        self.hashes: dict[str, dict[str, Any]] = {}
+        self.expiry: dict[str, int] = {}
 
     @staticmethod
     def from_url(url: str, decode_responses: bool = True):  # type: ignore[override]
@@ -52,6 +55,9 @@ class DummyRedis:
 
         return Pipeline()
 
+    def ping(self):
+        return True
+
     def get(self, key: str):
         return self.storage.get(key)
 
@@ -60,9 +66,13 @@ class DummyRedis:
 
     def setex(self, key: str, ttl: int, value: str):
         self.storage[key] = value
+        self.expiry[key] = ttl
 
     def delete(self, key: str):
         self.storage.pop(key, None)
+        self.hashes.pop(key, None)
+        self.sets.pop(key, None)
+        self.expiry.pop(key, None)
 
     def llen(self, key: str) -> int:
         return 0
@@ -78,7 +88,32 @@ class DummyRedis:
         return len(self.zsets.get(key, []))
 
     def expire(self, key: str, ttl: int):
+        self.expiry[key] = ttl
         return True
+
+    def ttl(self, key: str):
+        if key in self.expiry:
+            return self.expiry[key]
+        if key in self.hashes or key in self.sets or key in self.storage:
+            return 60
+        return -2
+
+    def exists(self, key: str) -> bool:
+        return key in self.storage or key in self.hashes or key in self.sets
+
+    def smembers(self, key: str):
+        return set(self.sets.get(key, set()))
+
+    def sadd(self, key: str, *values: str):
+        members = self.sets.setdefault(key, set())
+        members.update(values)
+
+    def hset(self, key: str, mapping: dict[str, Any]):
+        data = self.hashes.setdefault(key, {})
+        data.update(mapping)
+
+    def hgetall(self, key: str):
+        return dict(self.hashes.get(key, {}))
 
 
 class DummyQueue:

@@ -1,0 +1,44 @@
+name: Test and Build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run tests with coverage
+        run: pytest -v --maxfail=1 --disable-warnings --cov=app --cov-report=term-missing
+
+      - name: Build Docker images
+        run: docker compose -f docker/docker-compose.yml build
+
+      - name: Export Docker images
+        run: |
+          mkdir -p build_artifacts
+          for image in secretaria-web secretaria-worker; do
+            if docker image inspect "${image}:latest" >/dev/null 2>&1; then
+              docker save "${image}:latest" -o "build_artifacts/${image}.tar"
+            fi
+          done
+
+      - name: Upload Docker artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-images
+          path: build_artifacts
