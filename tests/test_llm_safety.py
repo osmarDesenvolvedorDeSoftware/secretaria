@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import json
+import time
+
+import pytest
 import requests
 
-from app.services.llm import LLMClient
+from app.metrics import llm_errors
+from app.services.llm import LLMClient, LLMError
 from tests.conftest import DummyRedis
 
 
@@ -26,3 +31,62 @@ def test_prompt_injection_triggers_fallback(monkeypatch):
 
     assert response == "Desculpe, não posso executar esse tipo de comando."
     assert any(event == "prompt_injection_detected" for event, _ in warnings)
+
+
+def test_llm_generate_reply_success(monkeypatch):
+    redis_client = DummyRedis()
+    client = LLMClient(redis_client)
+
+    class StubResponse:
+        status_code = 200
+
+        def json(self):
+            return {
+                "candidates": [
+                    {
+                        "content": {
+                            "parts": [
+                                {"text": "Resposta final"},
+                            ]
+                        }
+                    }
+                ]
+            }
+
+    monkeypatch.setattr(requests, "post", lambda *args, **kwargs: StubResponse())
+
+    result = client.generate_reply("Olá", [{"role": "system", "body": "ctx"}])
+    assert result == "Resposta final"
+    assert redis_client.get("llm:circuit") is None
+
+
+def test_llm_request_failure_increments_metrics(monkeypatch):
+    redis_client = DummyRedis()
+    client = LLMClient(redis_client)
+
+    def failing_post(*args, **kwargs):
+        raise requests.ConnectionError("boom")
+
+    monkeypatch.setattr(requests, "post", failing_post)
+
+    baseline = llm_errors._value.get()
+
+    with pytest.raises(LLMError):
+        client.generate_reply("Olá", [])
+
+    assert llm_errors._value.get() >= baseline + 1
+    assert json.loads(redis_client.get("llm:circuit"))["failures"] >= 1
+
+
+def test_llm_circuit_breaker_blocks_when_open(monkeypatch):
+    redis_client = DummyRedis()
+    redis_client.set(
+        "llm:circuit",
+        json.dumps({"open": True, "opened_at": time.time()}),
+    )
+    client = LLMClient(redis_client)
+
+    monkeypatch.setattr(requests, "post", lambda *args, **kwargs: (_ for _ in ()).throw(Exception("should not call")))
+
+    with pytest.raises(LLMError):
+        client.generate_reply("Olá", [])

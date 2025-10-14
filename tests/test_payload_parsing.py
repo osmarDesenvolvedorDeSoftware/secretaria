@@ -99,3 +99,95 @@ def test_extract_text_and_kind(payload, expected_text, expected_kind):
     assert text == expected_text
     assert kind == expected_kind
     assert extract_number(payload).startswith("55")
+
+
+def test_extract_text_from_messages_array():
+    payload = {
+        "messages": [
+            {
+                "message": {
+                    "videoMessage": {
+                        "fileName": "demo.mp4",
+                    }
+                }
+            }
+        ],
+        "number": "5511999988888",
+    }
+
+    text, kind = extract_text_and_kind(payload)
+
+    assert text == "demo.mp4"
+    assert kind == "media"
+
+
+def test_extract_text_from_raw_message_string():
+    payload = {
+        "messages": [
+            {
+                "message": "Mensagem direta",
+            }
+        ],
+        "number": "5511888877776",
+    }
+
+    text, kind = extract_text_and_kind(payload)
+
+    assert text == "Mensagem direta"
+    assert kind == "text"
+
+
+def test_extract_text_from_fallback_keys():
+    payload = {
+        "caption": "Legenda prioritária",
+        "contact": {"phone": "1188776655"},
+    }
+
+    text, kind = extract_text_and_kind(payload)
+
+    assert text == "Legenda prioritária"
+    assert kind == "text"
+
+
+def test_extract_text_from_native_flow_interactive():
+    payload = {
+        "message": {
+            "interactiveResponseMessage": {
+                "result": {"paramsJson": None},
+                "nativeFlowResponseMessage": {
+                    "messageParamsJson": {"id": "flow-123"}
+                },
+            }
+        },
+        "ticket": {"contact": {"number": "551177665544"}},
+    }
+
+    text, kind = extract_text_and_kind(payload)
+
+    assert text == "flow-123"
+    assert kind == "interactive"
+
+
+def test_extract_text_from_template_buttons():
+    payload = {
+        "message": {
+            "templateMessage": {
+                "hydratedTemplate": {
+                    "buttons": [
+                        {"buttonId": "BTN-42", "displayText": "Escolher"},
+                    ]
+                }
+            }
+        },
+        "from": "551155554433",
+    }
+
+    text, kind = extract_text_and_kind(payload)
+
+    assert text == "BTN-42"
+    assert kind == "template"
+
+
+def test_extract_number_raises_on_missing_data():
+    with pytest.raises(ValueError):
+        extract_number({})

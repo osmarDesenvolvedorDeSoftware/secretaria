@@ -95,7 +95,14 @@ def init_app() -> Flask:
 
     @app.route("/metrics")
     def metrics():
-        queue_size = app.task_queue.count() if hasattr(app.task_queue, "count") else 0  # type: ignore[attr-defined]
+        queue_obj = getattr(app, "task_queue", None)
+        queue_size = 0
+        if queue_obj is not None:
+            count_attr = getattr(queue_obj, "count", None)
+            if callable(count_attr):
+                queue_size = count_attr()
+            elif isinstance(count_attr, int):
+                queue_size = count_attr
         queue_gauge.set(queue_size)
         return app.response_class(generate_latest(), mimetype=CONTENT_TYPE_LATEST)
 

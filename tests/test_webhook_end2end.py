@@ -84,3 +84,40 @@ def test_webhook_rate_limited(app, client, monkeypatch):
 
     assert response.status_code == 429
     assert app.task_queue.enqueued == []  # type: ignore[attr-defined]
+
+
+def test_webhook_invalid_token(app, client, monkeypatch):
+    app.task_queue.enqueued.clear()  # type: ignore[attr-defined]
+    monkeypatch.setattr(settings, "webhook_token_optional", "expected")
+    payload = {"message": {"conversation": "olá"}, "number": "5511999999999"}
+    body = json.dumps(payload).encode()
+    ts = 1_700_000_000
+    signature = _sign(ts, body)
+
+    response = client.post(
+        "/webhook/whaticket",
+        data=body,
+        headers={"X-Signature": signature, "X-Timestamp": str(ts), "X-Webhook-Token": "wrong"},
+        content_type="application/json",
+    )
+
+    assert response.status_code == 401
+    assert app.task_queue.enqueued == []  # type: ignore[attr-defined]
+
+
+def test_webhook_invalid_payload_returns_400(app, client, monkeypatch):
+    app.task_queue.enqueued.clear()  # type: ignore[attr-defined]
+    body = b"{bad json"
+    ts = 1_700_000_000
+    signature = _sign(ts, body)
+    monkeypatch.setattr(time, "time", lambda: ts)
+
+    response = client.post(
+        "/webhook/whaticket",
+        data=body,
+        headers={"X-Signature": signature, "X-Timestamp": str(ts)},
+        content_type="application/json",
+    )
+
+    assert response.status_code == 400
+    assert app.task_queue.enqueued == []  # type: ignore[attr-defined]
