@@ -13,6 +13,7 @@ Execute com `python app.py` e acesse http://localhost:5000.
 
 from __future__ import annotations
 
+import os
 from datetime import datetime
 from typing import Optional
 
@@ -34,17 +35,32 @@ from flask_login import (
     logout_user,
 )
 from flask_sqlalchemy import SQLAlchemy
+import requests
+from dotenv import load_dotenv
 
 # ----------------------------------------------------------------------------
 # Configuração da aplicação e extensões
 # ----------------------------------------------------------------------------
+load_dotenv()
+
 app = Flask(__name__)
 app.config.update(
-    SECRET_KEY="segredo-super-seguro",  # Em produção use variáveis de ambiente!
-    SQLALCHEMY_DATABASE_URI="sqlite:///secretaria_osmar.db",
+    SECRET_KEY=os.environ.get("FLASK_SECRET_KEY", "segredo-super-seguro"),
+    SQLALCHEMY_DATABASE_URI=os.environ.get(
+        "SQLALCHEMY_DATABASE_URI", "sqlite:///secretaria_osmar.db"
+    ),
     SQLALCHEMY_TRACK_MODIFICATIONS=False,
-    ADMIN_USERNAME="osmar",
-    ADMIN_PASSWORD="123456",
+    ADMIN_USERNAME=os.environ.get("ADMIN_USERNAME", "osmar"),
+    ADMIN_PASSWORD=os.environ.get("ADMIN_PASSWORD", "123456"),
+    GEMINI_API_KEY=os.environ.get("GEMINI_API_KEY"),
+    GEMINI_MODEL=os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"),
+    GEMINI_TIMEOUT=int(os.environ.get("GEMINI_TIMEOUT", 15)),
+    WHATICKET_WEBHOOK_TOKEN=os.environ.get("WHATICKET_WEBHOOK_TOKEN"),
+    WHATSAPP_API_URL=os.environ.get(
+        "WHATSAPP_API_URL", "https://api.osmardev.online/api/messages/send"
+    ),
+    WHATSAPP_BEARER_TOKEN=os.environ.get("WHATSAPP_BEARER_TOKEN"),
+    WHATSAPP_TIMEOUT=int(os.environ.get("WHATSAPP_TIMEOUT", 15)),
 )
 
 db = SQLAlchemy(app)
@@ -130,6 +146,120 @@ def notify_osmar_via_callmebot(message: str) -> None:
     """Simula uma notificação via CallMeBot apenas imprimindo no console."""
 
     print(f"[CallMeBot] {message}")
+
+
+def generate_gemini_response(prompt: str) -> str:
+    """Solicita uma resposta ao modelo Gemini configurado na aplicação."""
+
+    api_key = app.config.get("GEMINI_API_KEY")
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY não configurada.")
+
+    model = app.config.get("GEMINI_MODEL", "gemini-2.5-flash")
+    url = (
+        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+    )
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {
+                        "text": prompt,
+                    }
+                ]
+            }
+        ]
+    }
+    headers = {
+        "x-goog-api-key": api_key,
+        "Content-Type": "application/json",
+    }
+
+    response = requests.post(
+        url,
+        headers=headers,
+        json=payload,
+        timeout=app.config.get("GEMINI_TIMEOUT", 15),
+    )
+    response.raise_for_status()
+    data = response.json()
+
+    candidates = data.get("candidates", [])
+    for candidate in candidates:
+        content = candidate.get("content", {})
+        for part in content.get("parts", []):
+            text = part.get("text")
+            if text:
+                return text.strip()
+
+    raise RuntimeError("Resposta inválida do Gemini.")
+
+
+def send_whatsapp_message(number: str, body: str) -> None:
+    """Envia uma mensagem via API configurada para disparos WhatsApp/Whaticket."""
+
+    token = app.config.get("WHATSAPP_BEARER_TOKEN")
+    if not token:
+        raise RuntimeError("WHATSAPP_BEARER_TOKEN não configurado.")
+
+    url = app.config.get("WHATSAPP_API_URL")
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+    payload = {"number": number, "body": body}
+
+    response = requests.post(
+        url,
+        headers=headers,
+        json=payload,
+        timeout=app.config.get("WHATSAPP_TIMEOUT", 15),
+    )
+    response.raise_for_status()
+
+
+@app.route("/webhook/whaticket", methods=["POST"])
+def whaticket_webhook():
+    """Recebe eventos do Whaticket, gera resposta via Gemini e envia pelo disparador."""
+
+    expected_token = app.config.get("WHATICKET_WEBHOOK_TOKEN")
+    if expected_token:
+        provided_token = request.headers.get("X-Webhook-Token") or request.args.get("token")
+        if provided_token != expected_token:
+            app.logger.warning("Webhook recebido com token inválido.")
+            return jsonify({"error": "unauthorized"}), 401
+
+    payload = request.get_json(silent=True) or {}
+    message_text = (
+        payload.get("body")
+        or payload.get("message")
+        or payload.get("text")
+        or payload.get("content")
+    )
+    number = payload.get("number") or payload.get("from") or payload.get("contact")
+
+    if not message_text or not number:
+        return (
+            jsonify({"error": "Campos 'number' e 'body' são obrigatórios no payload."}),
+            400,
+        )
+
+    try:
+        reply_text = generate_gemini_response(message_text)
+    except Exception as exc:  # pragma: no cover - log para depuração
+        app.logger.exception("Falha ao gerar resposta com Gemini: %s", exc)
+        return jsonify({"error": "falha_ia"}), 500
+
+    try:
+        send_whatsapp_message(number, reply_text)
+    except requests.RequestException as exc:  # pragma: no cover - log para depuração
+        app.logger.exception("Falha ao enviar mensagem para %s: %s", number, exc)
+        return jsonify({"error": "falha_envio"}), 502
+    except Exception as exc:  # pragma: no cover - log para depuração
+        app.logger.exception("Erro inesperado ao enviar mensagem: %s", exc)
+        return jsonify({"error": "falha_envio"}), 500
+
+    return jsonify({"status": "ok", "reply": reply_text})
 
 
 @app.before_first_request
