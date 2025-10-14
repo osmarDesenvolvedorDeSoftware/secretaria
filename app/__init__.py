@@ -54,7 +54,7 @@ def configure_logging() -> None:
 def init_app() -> Flask:
     configure_logging()
 
-    app = Flask(__name__)
+    app = Flask(__name__, template_folder="../templates")
     app.config["SQLALCHEMY_DATABASE_URI"] = settings.database_url
 
     engine = create_engine(settings.database_url, pool_pre_ping=True, future=True)
@@ -106,8 +106,11 @@ def init_app() -> Flask:
         queue_gauge.set(queue_size)
         return app.response_class(generate_latest(), mimetype=CONTENT_TYPE_LATEST)
 
+    from app.routes.projects import bp as projects_bp
+
     app.register_blueprint(health_bp)
     app.register_blueprint(webhook_bp)
+    app.register_blueprint(projects_bp)
 
     return app
 
