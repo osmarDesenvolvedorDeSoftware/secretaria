@@ -11,7 +11,7 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ra
 
 from app.metrics import llm_errors
 from app.config import settings
-from app.services.security import detect_prompt_injection
+from app.services.security import detect_prompt_injection, sanitize_for_log
 
 
 class LLMError(Exception):
@@ -78,7 +78,9 @@ class LLMClient:
             raise LLMError("Circuit breaker aberto")
 
         if detect_prompt_injection(text):
-            return "Desculpe, não posso responder a isso."
+            preview = sanitize_for_log(text[:128])
+            self.logger.warning("prompt_injection_detected", preview=preview)
+            return "Desculpe, não posso executar esse tipo de comando."
 
         messages = context[-settings.context_max_messages :] + [{"role": "user", "body": text}]
         payload = {
@@ -111,7 +113,10 @@ class LLMClient:
             self.circuit_breaker.record_success()
             return text_output.strip()
         except (requests.RequestException, json.JSONDecodeError) as exc:
-            self.logger.exception("llm_request_error", error=str(exc))
+            self.logger.exception(
+                "llm_request_error",
+                error=sanitize_for_log(str(exc)),
+            )
             self.circuit_breaker.record_failure()
             llm_errors.inc()
             raise LLMError("Falha ao chamar LLM")

@@ -4,10 +4,11 @@ import json
 from typing import Any
 
 from flask import Blueprint, Response, current_app, jsonify, request
-from pydantic import BaseModel, ValidationError, field_validator
+from pydantic import BaseModel, ValidationError, field_validator, model_validator
 from rq import Queue
 
 from app.metrics import webhook_received_counter
+from app.services.payload import extract_number, extract_text_and_kind
 from app.services.rate_limit import RateLimiter
 from app.services.security import sanitize_text, validate_hmac_signature, validate_webhook_token
 from app.services.tasks import TaskService
@@ -16,9 +17,10 @@ from app.services.tasks import TaskService
 webhook_bp = Blueprint("webhook", __name__, url_prefix="/webhook")
 
 
-class IncomingMessage(BaseModel):
+class IncomingWebhook(BaseModel):
     number: str
     text: str
+    kind: str
 
     @field_validator("number")
     @classmethod
@@ -32,33 +34,27 @@ class IncomingMessage(BaseModel):
             raise ValueError("number is required")
         return digits
 
+    @model_validator(mode="before")
     @classmethod
-    def from_payload(cls, payload: dict[str, Any]) -> "IncomingMessage":
-        message = payload.get("message") or {}
-        body = (
-            (message.get("body") if isinstance(message, dict) else None)
-            or payload.get("body")
-            or payload.get("message", {}).get("text")
-            or ""
-        )
-        if isinstance(body, dict):
-            text = body.get("text") or body.get("content") or body.get("body") or ""
-        else:
-            text = body
-        number = (
-            payload.get("from")
-            or payload.get("number")
-            or payload.get("contact", {}).get("number")
-            or payload.get("contact", {}).get("phone")
-            or payload.get("ticket", {}).get("contact", {}).get("number")
-            or ""
-        )
-        return cls(number=str(number), text=str(text or ""))
+    def from_payload_dict(cls, values: Any) -> Any:
+        if isinstance(values, dict) and ("text" not in values or "kind" not in values):
+            try:
+                number = extract_number(values)
+                text, kind = extract_text_and_kind(values)
+            except ValueError as exc:
+                raise ValueError(str(exc)) from exc
+            values = {"number": number, "text": text, "kind": kind, **values}
+        return values
 
     @classmethod
-    def parse_raw_body(cls, raw_body: bytes) -> "IncomingMessage":
+    def parse_raw_body(cls, raw_body: bytes) -> "IncomingWebhook":
         data = json.loads(raw_body)
         return cls.from_payload(data)
+
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any]) -> "IncomingWebhook":
+        return cls.model_validate(payload)
 
 
 @webhook_bp.post("/whaticket")
@@ -74,7 +70,7 @@ def whaticket_webhook() -> Response:
         return jsonify({"error": "invalid token"}), 401
 
     try:
-        payload = IncomingMessage.parse_raw_body(raw_body)
+        payload = IncomingWebhook.parse_raw_body(raw_body)
     except (json.JSONDecodeError, ValidationError) as exc:
         webhook_received_counter.labels(status="bad_request").inc()
         return jsonify({"error": "invalid payload", "details": str(exc)}), 400
@@ -104,6 +100,6 @@ def whaticket_webhook() -> Response:
 
         correlation_id = str(uuid.uuid4())
 
-    service.enqueue(sanitized_number, sanitized_text, correlation_id)
+    service.enqueue(sanitized_number, sanitized_text, payload.kind, correlation_id)
     webhook_received_counter.labels(status="accepted").inc()
     return jsonify({"queued": True}), 202
