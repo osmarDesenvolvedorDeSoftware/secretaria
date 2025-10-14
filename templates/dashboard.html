@@ -1,0 +1,35 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row g-4">
+  <div class="col-md-4">
+    <div class="card border-0 shadow-sm">
+      <div class="card-body">
+        <h5 class="card-title">Projetos publicados</h5>
+        <p class="display-6">{{ projects_count }}</p>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card border-0 shadow-sm">
+      <div class="card-body">
+        <h5 class="card-title">Reuniões pendentes</h5>
+        <p class="display-6">{{ meetings_pending }}</p>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card border-0 shadow-sm">
+      <div class="card-body">
+        <h5 class="card-title">Reuniões confirmadas</h5>
+        <p class="display-6">{{ meetings_confirmed }}</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="mt-5">
+  <h2 class="h5">Fluxo do Chatbot</h2>
+  <pre class="bg-light p-3 border">{{ chatbot_workflow }}</pre>
+</div>
+{% endblock %}
