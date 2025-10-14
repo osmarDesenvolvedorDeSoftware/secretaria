@@ -43,10 +43,64 @@ make dev         # roda Flask com debug
 
 * URL: `POST /webhook/whaticket`
 * Headers obrigatórios:
-  * `X-Signature`: `hex(hmac_sha256(SHARED_SECRET, raw_body))`
+  * `X-Timestamp`: epoch UNIX (segundos) gerado no momento do envio
+  * `X-Signature`: `hex(hmac_sha256(SHARED_SECRET, f"{timestamp}.{raw_body}"))`
   * `Content-Type: application/json`
   * `X-Webhook-Token`: opcional, se configurado
 * Resposta: `202 Accepted` com `{ "queued": true }` quando a mensagem é enfileirada.
+
+### Gerando a assinatura HMAC
+
+```python
+import hmac
+from hashlib import sha256
+
+secret = "minha-shared-secret"
+timestamp = 1700000000
+raw_body = b'{"message": {"conversation": "olá"}, "number": "5511999999999"}'
+
+message = f"{timestamp}.".encode() + raw_body
+signature = hmac.new(secret.encode(), message, sha256).hexdigest()
+
+headers = {
+    "X-Timestamp": str(timestamp),
+    "X-Signature": signature,
+}
+```
+
+Envie o payload em até ±300 segundos do `X-Timestamp` informado para evitar rejeição por replay.
+
+### Exemplos de payloads
+
+* **Mensagem de texto**
+
+```json
+{
+  "message": {"conversation": "olá"},
+  "number": "5511999999999"
+}
+```
+
+* **Interativo (botão/lista)**
+
+```json
+{
+  "message": {
+    "buttonsResponseMessage": {
+      "selectedDisplayText": "Quero falar com suporte"
+    }
+  },
+  "ticket": {"contact": {"number": "5511988877766"}}
+}
+```
+
+* **Payload inválido (faltando número)**
+
+```json
+{
+  "message": {"conversation": "olá"}
+}
+```
 
 ## Métricas
 
@@ -64,14 +118,12 @@ Veja a árvore completa no repositório para entender os módulos de rotas, serv
 ## Testes
 
 ```bash
-python -m pytest --cov=app
+pytest -v --maxfail=1 --disable-warnings
+make up
+curl -i http://localhost:8080/healthz
 ```
 
-Os testes cobrem:
-
-* Validação HMAC do webhook.
-* Fluxo completo de enfileiramento.
-* Processamento da tarefa incluindo persistência e envio.
+Os testes cobrem o parsing completo do payload, a proteção HMAC com `X-Timestamp` anti-replay, o cliente Whaticket com retries, sanitização de logs, bloqueio de prompt-injection e o fluxo end-to-end do webhook com enfileiramento no Redis.
 
 ## Docker
 

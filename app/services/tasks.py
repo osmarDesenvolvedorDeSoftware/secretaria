@@ -21,8 +21,8 @@ from app.services.persistence import (
     get_or_create_conversation,
     update_conversation_context,
 )
-from app.services.security import detect_prompt_injection, sanitize_text
-from app.services.whaticket import WhaticketClient
+from app.services.security import detect_prompt_injection, sanitize_for_log, sanitize_text
+from app.services.whaticket import WhaticketClient, WhaticketError
 
 
 CONTEXT_REDIS_KEY = "ctx:{number}"
@@ -36,7 +36,7 @@ class TaskService:
         self.llm_client = LLMClient(redis_client)
         self.whaticket_client = WhaticketClient(redis_client)
 
-    def enqueue(self, number: str, body: str, correlation_id: str) -> None:
+    def enqueue(self, number: str, body: str, kind: str, correlation_id: str) -> None:
         delays = list(settings.rq_retry_delays)
         retry = Retry(max=len(delays), interval=delays) if delays else None
         enqueue_kwargs = {}
@@ -46,6 +46,7 @@ class TaskService:
             process_incoming_message,
             number,
             body,
+            kind,
             correlation_id,
             job_timeout=settings.llm_timeout_seconds + settings.request_timeout_seconds,
             **enqueue_kwargs,
@@ -70,10 +71,14 @@ class TaskService:
         self.redis.setex(key, settings.context_ttl_seconds, json.dumps(truncated))
 
 
-def process_incoming_message(number: str, body: str, correlation_id: str) -> None:
+def process_incoming_message(number: str, body: str, kind: str, correlation_id: str) -> None:
     from flask import current_app
 
-    logger = structlog.get_logger().bind(task="process_incoming_message")
+    logger = structlog.get_logger().bind(
+        task="process_incoming_message",
+        number=number,
+        kind=kind,
+    )
     start_time = time.time()
 
     redis_client: Redis = current_app.redis  # type: ignore[attr-defined]
@@ -85,53 +90,81 @@ def process_incoming_message(number: str, body: str, correlation_id: str) -> Non
         try:
             sanitized = sanitize_text(body)
             if detect_prompt_injection(sanitized):
-                logger.warning("prompt_injection_detected", number=number)
-                sanitized = "No momento, não posso responder a isso."
-
-            context_messages = service.get_context(number)
-            llm_start = time.time()
-            try:
-                response = service.llm_client.generate_reply(
-                    sanitized,
-                    context_messages,
-                )
-                llm_latency.observe(time.time() - llm_start)
-            except Exception as exc:  # pragma: no cover - ensures metrics capture
-                logger.exception("llm_failure", number=number)
-                llm_errors.inc()
-                llm_latency.observe(time.time() - llm_start)
-                response = "Estou com dificuldades técnicas. " + settings.transfer_to_human_message
-
-            final_message = response
+                logger.warning("prompt_injection_detected")
+                final_message = "Desculpe, não posso executar esse tipo de comando."
+                user_message = sanitized
+                context_messages = service.get_context(number)
+            else:
+                context_messages = service.get_context(number)
+                user_message = sanitized
+                llm_start = time.time()
+                try:
+                    response = service.llm_client.generate_reply(
+                        sanitized,
+                        context_messages,
+                    )
+                    llm_latency.observe(time.time() - llm_start)
+                    final_message = response
+                except Exception as exc:  # pragma: no cover - ensures metrics capture
+                    logger.exception("llm_failure", error=sanitize_for_log(str(exc)))
+                    llm_errors.inc()
+                    llm_latency.observe(time.time() - llm_start)
+                    final_message = "Estou com dificuldades técnicas. " + settings.transfer_to_human_message
 
             whaticket_start = time.time()
-            success = True
             external_id = None
+            success = False
+            error_detail = None
             try:
-                external_id = service.whaticket_client.send_message(number, final_message)
+                external_id = service.whaticket_client.send_text(number, final_message)
                 whaticket_latency.observe(time.time() - whaticket_start)
-            except Exception as exc:
-                logger.exception("whaticket_failure", number=number)
+                success = True
+            except WhaticketError as exc:
+                error_detail = sanitize_for_log(str(exc))
+                logger.exception("whaticket_failure", error=error_detail)
                 whaticket_errors.inc()
                 whaticket_latency.observe(time.time() - whaticket_start)
-                success = False
+                if exc.retryable:
+                    queue.enqueue(
+                        process_incoming_message,
+                        number,
+                        body,
+                        kind,
+                        correlation_id,
+                    )
+                raise
+            except Exception as exc:
+                error_detail = sanitize_for_log(str(exc))
+                logger.exception("whaticket_failure_unexpected", error=error_detail)
+                whaticket_errors.inc()
+                whaticket_latency.observe(time.time() - whaticket_start)
                 raise
             finally:
                 session = session_factory()  # type: ignore[operator]
                 try:
-                    conversation = get_or_create_conversation(session, number)
-                    context_messages.append({"role": "user", "body": sanitized})
-                    context_messages.append({"role": "assistant", "body": final_message})
-                    update_conversation_context(session, conversation, context_messages)
-                    status = "SENT" if success else "FAILED"
-                    add_delivery_log(session, number, final_message, status, external_id)
-                    session.commit()
+                    if success:
+                        conversation = get_or_create_conversation(session, number)
+                        context_messages.append({"role": "user", "body": user_message})
+                        context_messages.append({"role": "assistant", "body": final_message})
+                        update_conversation_context(session, conversation, context_messages)
+                        add_delivery_log(session, number, final_message, "SENT", external_id)
+                        session.commit()
+                        service.set_context(number, context_messages)
+                    else:
+                        add_delivery_log(
+                            session,
+                            number,
+                            final_message,
+                            "FAILED",
+                            external_id,
+                            error_detail,
+                        )
+                        session.commit()
                 except Exception:
                     session.rollback()
                     raise
                 finally:
                     session.close()
                     session_factory.remove()
-                service.set_context(number, context_messages)
         finally:
             task_latency_histogram.observe(time.time() - start_time)

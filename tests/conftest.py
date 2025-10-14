@@ -24,30 +24,31 @@ class DummyRedis:
         return DummyRedis()
 
     def pipeline(self):
+        redis = self
+
         class Pipeline:
-            def __init__(self):
-                self.count = 0
+            def __init__(self) -> None:
+                self._zcard_count = 0
 
-            def zremrangebyscore(self, *args, **kwargs):
+            def zremrangebyscore(self, key, _min, _max):
+                scores = redis.zsets.get(key, [])
+                redis.zsets[key] = [score for score in scores if not (_min <= score <= _max)]
                 return self
 
-            def zadd(self, *args, **kwargs):
-                if args and isinstance(args[-1], dict):
-                    self.count += len(args[-1])
-                elif "mapping" in kwargs:
-                    self.count += len(kwargs["mapping"])
-                else:
-                    self.count += 1
+            def zadd(self, key, mapping: dict[str, float]):
+                scores = redis.zsets.setdefault(key, [])
+                scores.extend(mapping.values())
                 return self
 
-            def zcard(self, *args, **kwargs):
+            def zcard(self, key):
+                self._zcard_count = len(redis.zsets.get(key, []))
                 return self
 
-            def expire(self, *args, **kwargs):
+            def expire(self, key, ttl):
                 return self
 
             def execute(self):
-                return [None, None, max(self.count, 1), None]
+                return [None, None, self._zcard_count, None]
 
         return Pipeline()
 
@@ -82,13 +83,16 @@ class DummyRedis:
 
 class DummyQueue:
     def __init__(self, *args, **kwargs):
-        pass
+        self.enqueued: list[tuple[Any, tuple[Any, ...], dict[str, Any]]] = []
 
     def enqueue(self, *args, **kwargs):
-        pass
+        func = args[0]
+        job_args = args[1:]
+        self.enqueued.append((func, job_args, kwargs))
+        return {"id": len(self.enqueued)}
 
     def count(self):
-        return 0
+        return len(self.enqueued)
 
 
 @pytest.fixture
