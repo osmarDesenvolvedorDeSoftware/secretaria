@@ -1,0 +1,60 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="card shadow-sm">
+  <div class="card-body">
+    <h1 class="h5 mb-3">Reuniões agendadas</h1>
+    {% if meetings %}
+      <div class="table-responsive">
+        <table class="table align-middle">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Cliente</th>
+              <th>Contato</th>
+              <th>Data/Hora</th>
+              <th>Status</th>
+              <th>Notas</th>
+              <th>Ações</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for meeting in meetings %}
+            <tr>
+              <td>{{ meeting.id }}</td>
+              <td>{{ meeting.client_name }}</td>
+              <td>{{ meeting.contact or 'N/D' }}</td>
+              <td>{{ meeting.datetime.strftime('%d/%m/%Y %H:%M') if meeting.datetime else 'A definir' }}</td>
+              <td>
+                {% if meeting.status == 'confirmed' %}
+                  <span class="badge bg-success">Confirmada</span>
+                {% elif meeting.status == 'cancelled' %}
+                  <span class="badge bg-secondary">Cancelada</span>
+                {% else %}
+                  <span class="badge bg-warning text-dark">Pendente</span>
+                {% endif %}
+              </td>
+              <td>{{ meeting.notes or '-' }}</td>
+              <td>
+                <form method="post" class="d-flex gap-2">
+                  <input type="hidden" name="meeting_id" value="{{ meeting.id }}">
+                  <input type="hidden" name="action" value="confirm">
+                  <button type="submit" class="btn btn-sm btn-primary" {% if meeting.status == 'confirmed' %}disabled{% endif %}>Confirmar</button>
+                </form>
+                <form method="post" class="mt-2">
+                  <input type="hidden" name="meeting_id" value="{{ meeting.id }}">
+                  <input type="hidden" name="action" value="cancel">
+                  <button type="submit" class="btn btn-sm btn-outline-danger">Cancelar</button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="text-muted">Nenhuma reunião cadastrada até o momento.</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
