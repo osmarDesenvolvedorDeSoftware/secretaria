@@ -6,6 +6,7 @@ install:
 	python3.11 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt
 
 dev:
+	alembic upgrade head
 	flask --app run.py --debug run --host=0.0.0.0 --port=8080
 
 migrate:
@@ -15,6 +16,7 @@ upgrade:
 	alembic upgrade head
 
 worker:
+	alembic upgrade head
 	python -m app.workers.rq_worker
 
 up:
