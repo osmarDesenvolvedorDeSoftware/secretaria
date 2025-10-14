@@ -1,25 +1,28 @@
 """Aplicação Flask "Secretária Osmar".
 
-Este arquivo contém a aplicação principal com:
-- Configuração de banco de dados SQLite via SQLAlchemy;
-- Sistema simples de login usando Flask-Login;
-- Rotas do painel administrativo para gerenciar projetos e reuniões;
-- API REST consumida pelo chatbot externo;
-- Função mock para integração com CallMeBot (WhatsApp).
+Este módulo reúne toda a lógica da aplicação web solicitada:
+- Configuração do Flask e da extensão SQLAlchemy;
+- Modelos `Project` e `Meeting` com serialização para JSON;
+- Rotas HTML (com Bootstrap) para gerenciamento de projetos e reuniões;
+- API RESTful simples para consulta e criação de registros;
+- Autenticação mínima com o usuário "osmar"/"123456";
+- Função `notify_osmar_via_callmebot` simulada, apenas imprimindo no console.
 
-Execute com `python app.py`.
+Execute com `python app.py` e acesse http://localhost:5000.
 """
+
+from __future__ import annotations
 
 from datetime import datetime
 from typing import Optional
 
 from flask import (
     Flask,
+    flash,
     jsonify,
     redirect,
     render_template,
     request,
-    flash,
     url_for,
 )
 from flask_login import (
@@ -31,21 +34,17 @@ from flask_login import (
     logout_user,
 )
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import event
-import requests
 
-# -----------------------------------------------------------------------------
-# Configuração básica da aplicação
-# -----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
+# Configuração da aplicação e extensões
+# ----------------------------------------------------------------------------
 app = Flask(__name__)
 app.config.update(
-    SECRET_KEY="segredo-super-seguro",
+    SECRET_KEY="segredo-super-seguro",  # Em produção use variáveis de ambiente!
     SQLALCHEMY_DATABASE_URI="sqlite:///secretaria_osmar.db",
     SQLALCHEMY_TRACK_MODIFICATIONS=False,
     ADMIN_USERNAME="osmar",
-    ADMIN_PASSWORD="123456",  # Em produção utilize variáveis de ambiente!
-    CALLMEBOT_PHONE="+550000000000",
-    CALLMEBOT_API_KEY="CHAVE_DE_EXEMPLO",
+    ADMIN_PASSWORD="123456",
 )
 
 db = SQLAlchemy(app)
@@ -53,11 +52,11 @@ login_manager = LoginManager(app)
 login_manager.login_view = "login"
 
 
-# -----------------------------------------------------------------------------
-# Modelos do banco de dados
-# -----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
+# Modelos de dados
+# ----------------------------------------------------------------------------
 class Project(db.Model):
-    """Tabela de projetos apresentados aos clientes."""
+    """Projetos apresentados pelo Osmar."""
 
     __tablename__ = "projects"
 
@@ -66,25 +65,25 @@ class Project(db.Model):
     description = db.Column(db.Text)
     tech_stack = db.Column(db.Text)
     demo_url = db.Column(db.String(255))
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     updated_at = db.Column(
         db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
     )
 
     def to_dict(self) -> dict:
-        """Representação em dicionário utilizada pelas APIs."""
-
         return {
             "id": self.id,
             "name": self.name,
             "description": self.description,
             "tech_stack": self.tech_stack,
             "demo_url": self.demo_url,
+            "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
 
 
 class Meeting(db.Model):
-    """Tabela de reuniões/agendamentos."""
+    """Reuniões agendadas pelo chatbot."""
 
     __tablename__ = "meetings"
 
@@ -92,12 +91,11 @@ class Meeting(db.Model):
     client_name = db.Column(db.String(255), nullable=False)
     contact = db.Column(db.String(255))
     datetime = db.Column(db.DateTime)
-    status = db.Column(db.String(50), default="pending")
+    status = db.Column(db.String(50), nullable=False, default="pending")
     notes = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
     def to_dict(self) -> dict:
-        """Representação em dicionário utilizada pelas APIs."""
-
         return {
             "id": self.id,
             "client_name": self.client_name,
@@ -105,97 +103,76 @@ class Meeting(db.Model):
             "datetime": self.datetime.isoformat() if self.datetime else None,
             "status": self.status,
             "notes": self.notes,
+            "created_at": self.created_at.isoformat(),
         }
 
 
-# -----------------------------------------------------------------------------
-# Criação automática do banco de dados na primeira execução
-# -----------------------------------------------------------------------------
-@event.listens_for(Project.__table__, "after_create")
-def insert_sample_projects(*_, **__):
-    """Insere projetos de exemplo para facilitar a demonstração."""
-
-    demo_projects = [
-        Project(
-            name="App Android com QR Code",
-            description="Aplicativo Android em Kotlin com leitura de QR Code e integração com APIs.",
-            tech_stack="Kotlin, MVVM, Retrofit, Firebase",
-            demo_url="https://github.com/osmar/android-qrcode-demo",
-        ),
-        Project(
-            name="Dashboard de automação em Python",
-            description="Dashboard Flask para monitoramento de robôs RPA e integrações com Google.",
-            tech_stack="Python, Flask, RPA, Google APIs",
-            demo_url="https://github.com/osmar/python-dashboard",
-        ),
-    ]
-    db.session.bulk_save_objects(demo_projects)
-    db.session.commit()
-
-
-with app.app_context():
-    db.create_all()
-
-
-# -----------------------------------------------------------------------------
-# Usuário administrativo (login simples)
-# -----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
+# Autenticação simplificada (usuário único)
+# ----------------------------------------------------------------------------
 class AdminUser(UserMixin):
-    """Representa o usuário administrador único do sistema."""
-
-    def __init__(self, user_id: str, username: str):
+    def __init__(self, user_id: str, username: str) -> None:
         self.id = user_id
         self.username = username
 
 
 @login_manager.user_loader
 def load_user(user_id: str) -> Optional[AdminUser]:
-    """Carrega o usuário para a sessão do Flask-Login."""
-
     if user_id == "admin":
         return AdminUser("admin", app.config["ADMIN_USERNAME"])
     return None
 
 
-# -----------------------------------------------------------------------------
-# Integração (mock) com CallMeBot para notificar o Osmar via WhatsApp
-# -----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
+# Funções utilitárias
+# ----------------------------------------------------------------------------
 def notify_osmar_via_callmebot(message: str) -> None:
-    """Envia notificação via CallMeBot.
+    """Simula uma notificação via CallMeBot apenas imprimindo no console."""
 
-    Esta função demonstra como a integração seria realizada. O número de telefone
-    e a API key devem ser configurados via variáveis de ambiente em produção.
-    Caso a chamada à API falhe, registramos no log da aplicação.
-    """
-
-    phone = app.config.get("CALLMEBOT_PHONE")
-    api_key = app.config.get("CALLMEBOT_API_KEY")
-    if not phone or not api_key:
-        app.logger.warning("Configuração do CallMeBot ausente. Mensagem: %s", message)
-        return
-
-    url = "https://api.callmebot.com/whatsapp.php"
-    payload = {
-        "phone": phone,
-        "text": message,
-        "apikey": api_key,
-    }
-
-    try:
-        response = requests.get(url, params=payload, timeout=10)
-        response.raise_for_status()
-        app.logger.info("Notificação enviada para Osmar: %s", message)
-    except requests.RequestException as exc:
-        app.logger.error("Falha ao enviar notificação: %s", exc)
+    print(f"[CallMeBot] {message}")
 
 
-# -----------------------------------------------------------------------------
-# Rotas públicas e de autenticação
-# -----------------------------------------------------------------------------
+@app.before_first_request
+def create_database_and_seed() -> None:
+    """Cria as tabelas e adiciona registros de exemplo se o banco estiver vazio."""
+
+    db.create_all()
+
+    if Project.query.count() == 0:
+        sample_projects = [
+            Project(
+                name="Aplicativo QR Code",
+                description="App Android para leitura de QR Code com Kotlin e Firebase.",
+                tech_stack="Kotlin, MVVM, Firebase",
+                demo_url="https://github.com/osmar/android-qrcode-demo",
+            ),
+            Project(
+                name="Dashboard de Vendas",
+                description="Dashboard web integrando Shopee, Google Sheets e WhatsApp.",
+                tech_stack="Python, Flask, Bootstrap",
+                demo_url="https://github.com/osmar/dashboard-demo",
+            ),
+        ]
+        db.session.add_all(sample_projects)
+        db.session.commit()
+
+    if Meeting.query.count() == 0:
+        meeting = Meeting(
+            client_name="Cliente Exemplo",
+            contact="cliente@example.com",
+            datetime=datetime.utcnow(),
+            notes="Reunião inicial demonstrativa.",
+            status="pending",
+        )
+        db.session.add(meeting)
+        db.session.commit()
+
+
+# ----------------------------------------------------------------------------
+# Rotas HTML protegidas por login
+# ----------------------------------------------------------------------------
 @app.route("/")
 def index():
-    """Redireciona para o painel administrativo ou para o login."""
-
     if current_user.is_authenticated:
         return redirect(url_for("dashboard"))
     return redirect(url_for("login"))
@@ -203,18 +180,15 @@ def index():
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
-    """Tela de login simples protegendo o painel administrativo."""
-
     if request.method == "POST":
-        username = request.form.get("username")
-        password = request.form.get("password")
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
 
         if (
             username == app.config["ADMIN_USERNAME"]
             and password == app.config["ADMIN_PASSWORD"]
         ):
-            user = AdminUser("admin", username)
-            login_user(user)
+            login_user(AdminUser("admin", username))
             flash("Login realizado com sucesso!", "success")
             return redirect(url_for("dashboard"))
 
@@ -226,21 +200,14 @@ def login():
 @app.route("/logout")
 @login_required
 def logout():
-    """Finaliza a sessão do usuário administrador."""
-
     logout_user()
-    flash("Você saiu do painel.", "info")
+    flash("Sessão encerrada.", "info")
     return redirect(url_for("login"))
 
 
-# -----------------------------------------------------------------------------
-# Rotas do painel administrativo (interface web)
-# -----------------------------------------------------------------------------
-@app.route("/admin")
+@app.route("/dashboard")
 @login_required
 def dashboard():
-    """Página inicial do painel com estatísticas rápidas."""
-
     projects_count = Project.query.count()
     meetings_pending = Meeting.query.filter_by(status="pending").count()
     meetings_confirmed = Meeting.query.filter_by(status="confirmed").count()
@@ -255,23 +222,17 @@ def dashboard():
 @app.route("/admin/projects", methods=["GET", "POST"])
 @login_required
 def manage_projects():
-    """Lista e cadastra novos projetos."""
-
     if request.method == "POST":
-        name = request.form.get("name")
-        description = request.form.get("description")
-        tech_stack = request.form.get("tech_stack")
-        demo_url = request.form.get("demo_url")
+        project = Project(
+            name=request.form.get("name", "").strip(),
+            description=request.form.get("description"),
+            tech_stack=request.form.get("tech_stack"),
+            demo_url=request.form.get("demo_url"),
+        )
 
-        if not name:
-            flash("Nome é obrigatório.", "danger")
+        if not project.name:
+            flash("O nome do projeto é obrigatório.", "danger")
         else:
-            project = Project(
-                name=name,
-                description=description,
-                tech_stack=tech_stack,
-                demo_url=demo_url,
-            )
             db.session.add(project)
             db.session.commit()
             flash("Projeto cadastrado com sucesso!", "success")
@@ -284,17 +245,21 @@ def manage_projects():
 @app.route("/admin/projects/<int:project_id>/edit", methods=["GET", "POST"])
 @login_required
 def edit_project(project_id: int):
-    """Edita um projeto existente."""
-
     project = Project.query.get_or_404(project_id)
+
     if request.method == "POST":
-        project.name = request.form.get("name")
-        project.description = request.form.get("description")
-        project.tech_stack = request.form.get("tech_stack")
-        project.demo_url = request.form.get("demo_url")
-        db.session.commit()
-        flash("Projeto atualizado com sucesso!", "success")
-        return redirect(url_for("manage_projects"))
+        name = request.form.get("name", "").strip()
+        if not name:
+            flash("O nome do projeto é obrigatório.", "danger")
+        else:
+            project.name = name
+            project.description = request.form.get("description")
+            project.tech_stack = request.form.get("tech_stack")
+            project.demo_url = request.form.get("demo_url")
+            project.updated_at = datetime.utcnow()
+            db.session.commit()
+            flash("Projeto atualizado!", "success")
+            return redirect(url_for("manage_projects"))
 
     return render_template("project_form.html", project=project)
 
@@ -302,29 +267,25 @@ def edit_project(project_id: int):
 @app.route("/admin/projects/<int:project_id>/delete", methods=["POST"])
 @login_required
 def delete_project(project_id: int):
-    """Remove um projeto."""
-
     project = Project.query.get_or_404(project_id)
     db.session.delete(project)
     db.session.commit()
-    flash("Projeto removido com sucesso!", "info")
+    flash("Projeto excluído.", "info")
     return redirect(url_for("manage_projects"))
 
 
 @app.route("/admin/meetings", methods=["GET", "POST"])
 @login_required
 def manage_meetings():
-    """Visualiza e confirma reuniões agendadas."""
-
     if request.method == "POST":
-        meeting_id = request.form.get("meeting_id")
+        meeting_id = request.form.get("meeting_id", type=int)
         action = request.form.get("action")
         meeting = Meeting.query.get_or_404(meeting_id)
 
         if action == "confirm":
             meeting.status = "confirmed"
             db.session.commit()
-            flash("Reunião confirmada! Osmar será notificado.", "success")
+            flash("Reunião confirmada. Osmar foi notificado!", "success")
             notify_osmar_via_callmebot(
                 f"Reunião confirmada com {meeting.client_name} em {meeting.datetime}."
             )
@@ -341,46 +302,39 @@ def manage_meetings():
     return render_template("meetings.html", meetings=meetings)
 
 
-# -----------------------------------------------------------------------------
-# API REST utilizada pelo chatbot externo
-# -----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
+# API REST
+# ----------------------------------------------------------------------------
 @app.route("/api/projects", methods=["GET"])
 def api_projects():
-    """Retorna todos os projetos em formato JSON."""
-
     projects = Project.query.order_by(Project.updated_at.desc()).all()
     return jsonify([project.to_dict() for project in projects])
 
 
-@app.route("/api/projects/<int:project_id>", methods=["GET"])
-def api_project_detail(project_id: int):
-    """Retorna os detalhes de um único projeto."""
-
-    project = Project.query.get_or_404(project_id)
-    return jsonify(project.to_dict())
-
-
 @app.route("/api/meetings", methods=["GET", "POST"])
 def api_meetings():
-    """Endpoint de reuniões utilizado pelo chatbot."""
-
     if request.method == "POST":
-        data = request.get_json(silent=True) or {}
-        client_name = data.get("client_name")
-        contact = data.get("contact")
-        datetime_str = data.get("datetime")
-        notes = data.get("notes")
+        payload = request.get_json(silent=True) or {}
+        client_name = (payload.get("client_name") or "").strip()
+        contact = payload.get("contact")
+        datetime_str = payload.get("datetime")
+        notes = payload.get("notes")
 
         if not client_name:
             return jsonify({"status": "error", "message": "Nome do cliente é obrigatório."}), 400
 
-        meeting_datetime = None
+        meeting_datetime: Optional[datetime] = None
         if datetime_str:
             try:
                 meeting_datetime = datetime.strptime(datetime_str, "%Y-%m-%d %H:%M")
             except ValueError:
                 return (
-                    jsonify({"status": "error", "message": "Formato de data/hora inválido. Use YYYY-MM-DD HH:MM."}),
+                    jsonify(
+                        {
+                            "status": "error",
+                            "message": "Formato inválido. Use YYYY-MM-DD HH:MM.",
+                        }
+                    ),
                     400,
                 )
 
@@ -389,41 +343,34 @@ def api_meetings():
             contact=contact,
             datetime=meeting_datetime,
             notes=notes,
-            status="pending",
         )
         db.session.add(meeting)
         db.session.commit()
-        return jsonify({"status": "success", "message": "Reunião agendada com sucesso"})
-
-    # GET - somente administradores autenticados podem consultar todas as reuniões
-    if not current_user.is_authenticated:
-        return jsonify({"error": "Autenticação requerida"}), 401
+        return jsonify({"status": "success", "meeting": meeting.to_dict()}), 201
 
     meetings = Meeting.query.order_by(Meeting.datetime.desc()).all()
     return jsonify([meeting.to_dict() for meeting in meetings])
 
 
-# -----------------------------------------------------------------------------
-# Documentação do comportamento esperado para o chatbot externo
-# -----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
+# Conteúdo auxiliar para os templates
+# ----------------------------------------------------------------------------
 CHATBOT_WORKFLOW = """
 Fluxo sugerido para o chatbot Secretária Osmar:
-1. Cumprimentar o cliente de forma simpática e identificar o motivo do contato.
+1. Cumprimentar o cliente e identificar o objetivo do contato.
 2. Consultar GET /api/projects para apresentar os principais trabalhos do Osmar.
-3. Caso o cliente deseje avançar, solicitar dados para agendar (nome, contato, data e hora) e enviar via POST /api/meetings.
-4. Após confirmação manual no painel (/admin/meetings), chamar notify_osmar_via_callmebot para avisar automaticamente o Osmar.
+3. Recolher nome, contato e data desejada para criar uma reunião via POST /api/meetings.
+4. Após confirmação manual no painel (/admin/meetings), o Osmar é avisado pela função notify_osmar_via_callmebot.
 """
 
 
 @app.context_processor
-def inject_chatbot_workflow():
-    """Disponibiliza a documentação do chatbot nos templates."""
-
+def inject_chatbot_workflow() -> dict:
     return {"chatbot_workflow": CHATBOT_WORKFLOW}
 
 
-# -----------------------------------------------------------------------------
-# Execução da aplicação
-# -----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
+# Execução
+# ----------------------------------------------------------------------------
 if __name__ == "__main__":
     app.run(debug=True)
