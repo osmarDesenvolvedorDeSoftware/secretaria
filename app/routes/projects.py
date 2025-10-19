@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from functools import wraps
-
 from flask import Blueprint, current_app, jsonify, render_template, request
 from redis import Redis
 from sqlalchemy import func, select
@@ -9,10 +7,11 @@ from sqlalchemy import func, select
 from app import get_db_session
 from app.config import settings
 from app.models import Company, PersonalizationConfig, Plan, Project, Subscription
-from app.services.auth import encode_jwt, verify_jwt
+from app.services.auth import encode_jwt
 from app.services.billing import BillingService
 from app.services.provisioner import ProvisionerService, ProvisioningPayload
-from app.services.tenancy import TenantContext, build_tenant_context
+from app.services.tenancy import TenantContext
+from app.routes.panel_auth import require_panel_auth, require_panel_company_id
 
 bp = Blueprint("projects", __name__)
 
@@ -28,14 +27,17 @@ def _project_to_dict(project: Project) -> dict[str, object]:
     }
 
 
-def _require_company_id() -> int:
-    company_id = getattr(request, "panel_company_id", None)
-    if company_id is None:
-        raise ValueError("company_id_missing")
-    try:
-        return int(company_id)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("invalid_company_id") from exc
+def _require_company_id(value: object | None = None) -> int:
+    return require_panel_company_id(value)
+
+
+def _get_billing_service() -> BillingService:
+    billing = getattr(current_app, "billing_service", None)
+    if billing is None:
+        analytics_service = getattr(current_app, "analytics_service", None)
+        billing = BillingService(current_app.db_session, current_app.redis, analytics_service)  # type: ignore[attr-defined]
+        current_app.billing_service = billing  # type: ignore[attr-defined]
+    return billing
 
 
 def _get_panel_config(session, company_id: int) -> PersonalizationConfig:
@@ -66,31 +68,6 @@ def _panel_config_payload(config: PersonalizationConfig) -> dict[str, object]:
         "empathy_level": int(data.get("empathy_level", 70) or 70),
         "adaptive_humor": bool(data.get("adaptive_humor", True)),
     }
-
-
-def _extract_token() -> str | None:
-    auth_header = request.headers.get("Authorization", "")
-    if auth_header.lower().startswith("bearer "):
-        return auth_header.split(" ", 1)[1].strip()
-    cookie_token = request.cookies.get("panel_token")
-    if cookie_token:
-        return cookie_token
-    return None
-
-
-def require_panel_auth(func):
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        token = _extract_token()
-        payload = verify_jwt(token, settings.panel_jwt_secret)
-        if payload is None:
-            return jsonify({"error": "unauthorized"}), 401
-        request.panel_identity = payload  # type: ignore[attr-defined]
-        request.panel_scope = payload.get("scope", "panel:admin")  # type: ignore[attr-defined]
-        request.panel_company_id = payload.get("company_id")  # type: ignore[attr-defined]
-        return func(*args, **kwargs)
-
-    return wrapper
 
 
 @bp.post("/api/tenants/provision")
@@ -255,7 +232,7 @@ def list_plans():
 @bp.get("/painel/empresas")
 @require_panel_auth
 def list_companies():
-    billing = BillingService(current_app.db_session, current_app.redis)  # type: ignore[attr-defined]
+    billing = _get_billing_service()
     with get_db_session(current_app) as session:
         companies = session.execute(select(Company).order_by(Company.created_at.desc())).scalars().all()
     summaries = [billing.summarize_company(company.id) for company in companies]
@@ -287,7 +264,7 @@ def create_company():
         session.flush()
         company_id = company.id
 
-    billing = BillingService(current_app.db_session, current_app.redis)  # type: ignore[attr-defined]
+    billing = _get_billing_service()
     if plan_id_raw is not None:
         try:
             billing.assign_plan(int(company_id), int(plan_id_raw), ciclo=ciclo, status=status)
@@ -332,7 +309,7 @@ def update_company(company_id: int):
         session.flush()
         status_value = company.status
 
-    billing = BillingService(current_app.db_session, current_app.redis)  # type: ignore[attr-defined]
+    billing = _get_billing_service()
     if plan_id_raw is not None:
         try:
             billing.assign_plan(company_id, int(plan_id_raw), ciclo=ciclo, status=status_value or "ativa")
@@ -346,7 +323,7 @@ def update_company(company_id: int):
 @bp.get("/painel/empresas/<int:company_id>")
 @require_panel_auth
 def get_company(company_id: int):
-    billing = BillingService(current_app.db_session, current_app.redis)  # type: ignore[attr-defined]
+    billing = _get_billing_service()
     summary = billing.summarize_company(company_id)
     if summary.get("status") == "desconhecida":
         return jsonify({"error": "not_found"}), 404

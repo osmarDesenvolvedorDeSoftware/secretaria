@@ -21,184 +21,310 @@
       </div>
       <div id="alerta" class="alert alert-warning d-none" role="alert"></div>
 
-      <div id="login-card" class="card shadow-sm mb-4 d-none">
-        <div class="card-body">
-          <h5 class="card-title">Autenticação necessária</h5>
-          <p class="card-text">Informe a senha operacional definida no ambiente para visualizar o painel.</p>
-          <form id="form-login" class="row g-3">
-            <div class="col-md-6">
-              <label for="empresa-id" class="form-label">ID da empresa</label>
-              <input type="number" class="form-control" id="empresa-id" min="1" required>
-            </div>
-            <div class="col-md-6">
-              <label for="senha-painel" class="form-label">Senha</label>
-              <input type="password" class="form-control" id="senha-painel" autocomplete="current-password" required>
-            </div>
-            <div class="col-md-12">
-              <button type="submit" class="btn btn-success">Entrar</button>
-            </div>
-          </form>
-        </div>
-      </div>
+      <ul class="nav nav-tabs mb-4" id="painel-tabs" role="tablist">
+        <li class="nav-item" role="presentation">
+          <button
+            class="nav-link active"
+            id="tab-operacional"
+            data-bs-toggle="tab"
+            data-bs-target="#painel-operacional"
+            type="button"
+            role="tab"
+            aria-controls="painel-operacional"
+            aria-selected="true"
+          >Operações</button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button
+            class="nav-link"
+            id="tab-analytics"
+            data-bs-toggle="tab"
+            data-bs-target="#painel-analytics"
+            type="button"
+            role="tab"
+            aria-controls="painel-analytics"
+            aria-selected="false"
+          >Analytics e Consumo</button>
+        </li>
+      </ul>
 
-      <div id="provision-card" class="card shadow-sm mb-4 d-none">
-        <div class="card-body">
-          <h5 class="card-title">Nova Empresa</h5>
-          <p class="text-muted">Configure rapidamente uma nova empresa com plano, domínios e infraestrutura isolada.</p>
-          <div id="provision-alert" class="alert d-none" role="alert"></div>
-          <form id="form-provision" class="row g-3">
-            <div class="col-md-6">
-              <label for="provision-company-name" class="form-label">Nome da empresa</label>
-              <input type="text" class="form-control" id="provision-company-name" required>
+      <div class="tab-content">
+        <div class="tab-pane fade show active" id="painel-operacional" role="tabpanel" aria-labelledby="tab-operacional">
+          <div id="login-card" class="card shadow-sm mb-4 d-none">
+            <div class="card-body">
+              <h5 class="card-title">Autenticação necessária</h5>
+              <p class="card-text">Informe a senha operacional definida no ambiente para visualizar o painel.</p>
+              <form id="form-login" class="row g-3">
+                <div class="col-md-6">
+                  <label for="empresa-id" class="form-label">ID da empresa</label>
+                  <input type="number" class="form-control" id="empresa-id" min="1" required>
+                </div>
+                <div class="col-md-6">
+                  <label for="senha-painel" class="form-label">Senha</label>
+                  <input type="password" class="form-control" id="senha-painel" autocomplete="current-password" required>
+                </div>
+                <div class="col-md-12">
+                  <button type="submit" class="btn btn-success">Entrar</button>
+                </div>
+              </form>
             </div>
-            <div class="col-md-6">
-              <label for="provision-domain" class="form-label">Domínio principal</label>
-              <input type="text" class="form-control" id="provision-domain" placeholder="empresa.com.br" required>
-            </div>
-            <div class="col-md-4">
-              <label for="provision-base-domain" class="form-label">Domínio base (plataforma)</label>
-              <input type="text" class="form-control" id="provision-base-domain" placeholder="minhasa.com">
-            </div>
-            <div class="col-md-4">
-              <label for="provision-tenant-slug" class="form-label">Slug do tenant</label>
-              <input type="text" class="form-control" id="provision-tenant-slug" placeholder="empresa">
-            </div>
-            <div class="col-md-4">
-              <label for="provision-billing-cycle" class="form-label">Ciclo de cobrança</label>
-              <select class="form-select" id="provision-billing-cycle">
-                <option value="mensal" selected>Mensal</option>
-                <option value="trimestral">Trimestral</option>
-                <option value="anual">Anual</option>
-              </select>
-            </div>
-            <div class="col-md-6">
-              <label for="provision-plan-name" class="form-label">Nome do plano</label>
-              <input type="text" class="form-control" id="provision-plan-name" placeholder="Plano Premium" required>
-            </div>
-            <div class="col-md-3">
-              <label for="provision-plan-price" class="form-label">Valor mensal (R$)</label>
-              <input type="number" class="form-control" id="provision-plan-price" min="0" step="0.01" value="0">
-            </div>
-            <div class="col-md-3">
-              <label for="provision-plan-messages" class="form-label">Limite de mensagens</label>
-              <input type="number" class="form-control" id="provision-plan-messages" min="100" step="50" value="1000">
-            </div>
-            <div class="col-md-6">
-              <label for="provision-plan-tokens" class="form-label">Limite de tokens</label>
-              <input type="number" class="form-control" id="provision-plan-tokens" min="1000" step="1000" value="500000">
-            </div>
-            <div class="col-md-6">
-              <label for="provision-plan-features" class="form-label">Recursos do plano</label>
-              <textarea class="form-control" id="provision-plan-features" rows="3" placeholder="Atendimento 24/7\nChatbot avançado\nIntegração Whaticket"></textarea>
-            </div>
-            <div class="col-12 d-flex justify-content-end">
-              <button type="submit" class="btn btn-primary">Provisionar empresa</button>
-            </div>
-          </form>
-          <div id="provision-progress-wrapper" class="mt-4 d-none">
-            <h6 class="mb-2">Progresso do provisionamento</h6>
-            <ul class="list-group" id="provision-progress"></ul>
           </div>
-          <div id="provision-credentials" class="alert alert-secondary mt-4 d-none"></div>
-        </div>
-      </div>
 
-      <div id="config-card" class="card shadow-sm mb-4 d-none">
-        <div class="card-body">
-          <h5 class="card-title">Configurações de Personalização</h5>
-          <div id="config-alert" class="alert alert-info d-none" role="alert"></div>
-          <form id="form-config" class="row g-3">
-            <div class="col-md-6">
-              <label class="form-label d-block">Tom de voz</label>
-              <div class="btn-group w-100" role="group" aria-label="Tom de voz" id="tone-group">
-                <input type="radio" class="btn-check" name="tone-option" id="tone-amigavel" data-tone-value="amigavel" autocomplete="off">
-                <label class="btn btn-outline-primary" for="tone-amigavel">Amigável</label>
-                <input type="radio" class="btn-check" name="tone-option" id="tone-formal" data-tone-value="formal" autocomplete="off">
-                <label class="btn btn-outline-primary" for="tone-formal">Formal</label>
-                <input type="radio" class="btn-check" name="tone-option" id="tone-informal" data-tone-value="informal" autocomplete="off">
-                <label class="btn btn-outline-primary" for="tone-informal">Informal</label>
-                <input type="radio" class="btn-check" name="tone-option" id="tone-tecnico" data-tone-value="tecnico" autocomplete="off">
-                <label class="btn btn-outline-primary" for="tone-tecnico">Técnico</label>
+          <div id="provision-card" class="card shadow-sm mb-4 d-none">
+            <div class="card-body">
+              <h5 class="card-title">Nova Empresa</h5>
+              <p class="text-muted">Configure rapidamente uma nova empresa com plano, domínios e infraestrutura isolada.</p>
+              <div id="provision-alert" class="alert d-none" role="alert"></div>
+              <form id="form-provision" class="row g-3">
+                <div class="col-md-6">
+                  <label for="provision-company-name" class="form-label">Nome da empresa</label>
+                  <input type="text" class="form-control" id="provision-company-name" required>
+                </div>
+                <div class="col-md-6">
+                  <label for="provision-domain" class="form-label">Domínio principal</label>
+                  <input type="text" class="form-control" id="provision-domain" placeholder="empresa.com.br" required>
+                </div>
+                <div class="col-md-4">
+                  <label for="provision-base-domain" class="form-label">Domínio base (plataforma)</label>
+                  <input type="text" class="form-control" id="provision-base-domain" placeholder="minhasa.com">
+                </div>
+                <div class="col-md-4">
+                  <label for="provision-tenant-slug" class="form-label">Slug do tenant</label>
+                  <input type="text" class="form-control" id="provision-tenant-slug" placeholder="empresa">
+                </div>
+                <div class="col-md-4">
+                  <label for="provision-billing-cycle" class="form-label">Ciclo de cobrança</label>
+                  <select class="form-select" id="provision-billing-cycle">
+                    <option value="mensal" selected>Mensal</option>
+                    <option value="trimestral">Trimestral</option>
+                    <option value="anual">Anual</option>
+                  </select>
+                </div>
+                <div class="col-md-6">
+                  <label for="provision-plan-name" class="form-label">Nome do plano</label>
+                  <input type="text" class="form-control" id="provision-plan-name" placeholder="Plano Premium" required>
+                </div>
+                <div class="col-md-3">
+                  <label for="provision-plan-price" class="form-label">Valor mensal (R$)</label>
+                  <input type="number" class="form-control" id="provision-plan-price" min="0" step="0.01" value="0">
+                </div>
+                <div class="col-md-3">
+                  <label for="provision-plan-messages" class="form-label">Limite de mensagens</label>
+                  <input type="number" class="form-control" id="provision-plan-messages" min="100" step="50" value="1000">
+                </div>
+                <div class="col-md-6">
+                  <label for="provision-plan-tokens" class="form-label">Limite de tokens</label>
+                  <input type="number" class="form-control" id="provision-plan-tokens" min="1000" step="1000" value="500000">
+                </div>
+                <div class="col-md-6">
+                  <label for="provision-plan-features" class="form-label">Recursos do plano</label>
+                  <textarea class="form-control" id="provision-plan-features" rows="3" placeholder="Atendimento 24/7\nChatbot avançado\nIntegração Whaticket"></textarea>
+                </div>
+                <div class="col-12 d-flex justify-content-end">
+                  <button type="submit" class="btn btn-primary">Provisionar empresa</button>
+                </div>
+              </form>
+              <div id="provision-progress-wrapper" class="mt-4 d-none">
+                <h6 class="mb-2">Progresso do provisionamento</h6>
+                <ul class="list-group" id="provision-progress"></ul>
               </div>
-              <input type="hidden" id="config-tone" value="amigavel">
+              <div id="provision-credentials" class="alert alert-secondary mt-4 d-none"></div>
             </div>
-            <div class="col-md-3">
-              <label for="config-limit" class="form-label">Limite de mensagens no contexto</label>
-              <input type="number" min="1" class="form-control" id="config-limit" value="5">
+          </div>
+
+          <div id="config-card" class="card shadow-sm mb-4 d-none">
+            <div class="card-body">
+              <h5 class="card-title">Configurações de Personalização</h5>
+              <div id="config-alert" class="alert alert-info d-none" role="alert"></div>
+              <form id="form-config" class="row g-3">
+                <div class="col-md-6">
+                  <label class="form-label d-block">Tom de voz</label>
+                  <div class="btn-group w-100" role="group" aria-label="Tom de voz" id="tone-group">
+                    <input type="radio" class="btn-check" name="tone-option" id="tone-amigavel" data-tone-value="amigavel" autocomplete="off">
+                    <label class="btn btn-outline-primary" for="tone-amigavel">Amigável</label>
+                    <input type="radio" class="btn-check" name="tone-option" id="tone-formal" data-tone-value="formal" autocomplete="off">
+                    <label class="btn btn-outline-primary" for="tone-formal">Formal</label>
+                    <input type="radio" class="btn-check" name="tone-option" id="tone-informal" data-tone-value="informal" autocomplete="off">
+                    <label class="btn btn-outline-primary" for="tone-informal">Informal</label>
+                    <input type="radio" class="btn-check" name="tone-option" id="tone-tecnico" data-tone-value="tecnico" autocomplete="off">
+                    <label class="btn btn-outline-primary" for="tone-tecnico">Técnico</label>
+                  </div>
+                  <input type="hidden" id="config-tone" value="amigavel">
+                </div>
+                <div class="col-md-3">
+                  <label for="config-limit" class="form-label">Limite de mensagens no contexto</label>
+                  <input type="number" min="1" class="form-control" id="config-limit" value="5">
+                </div>
+                <div class="col-md-3 d-flex align-items-end">
+                  <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="config-ai-enabled" checked>
+                    <label class="form-check-label" for="config-ai-enabled">
+                      IA ativada
+                    </label>
+                  </div>
+                </div>
+                <div class="col-md-6">
+                  <label for="config-formality" class="form-label">Nível de formalidade <span id="formality-display" class="badge bg-light text-dark">50</span></label>
+                  <input type="range" class="form-range" id="config-formality" min="0" max="100" value="50">
+                </div>
+                <div class="col-md-6">
+                  <label for="config-empathy" class="form-label">Grau de empatia <span id="empathy-display" class="badge bg-light text-dark">70</span></label>
+                  <input type="range" class="form-range" id="config-empathy" min="0" max="100" value="70">
+                </div>
+                <div class="col-md-4 d-flex align-items-end">
+                  <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="config-humor" checked>
+                    <label class="form-check-label" for="config-humor">
+                      Humor adaptativo
+                    </label>
+                  </div>
+                </div>
+                <div class="col-12">
+                  <label for="config-phrases" class="form-label">Frases iniciais (uma por linha)</label>
+                  <textarea class="form-control" id="config-phrases" rows="3" placeholder="Olá!\nComo posso ajudar?\nConta comigo!"></textarea>
+                </div>
+                <div class="col-12 d-flex justify-content-end">
+                  <button type="submit" class="btn btn-success">Salvar ajustes</button>
+                </div>
+              </form>
             </div>
-            <div class="col-md-3 d-flex align-items-end">
-              <div class="form-check form-switch">
-                <input class="form-check-input" type="checkbox" id="config-ai-enabled" checked>
-                <label class="form-check-label" for="config-ai-enabled">
-                  IA ativada
-                </label>
+          </div>
+
+          <div id="companies-card" class="card shadow-sm mb-4 d-none">
+            <div class="card-body">
+              <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5 class="card-title mb-0">Empresas e planos</h5>
+                <span class="badge bg-primary" id="companies-count">0 empresas</span>
+              </div>
+              <div class="table-responsive">
+                <table class="table table-sm table-striped">
+                  <thead>
+                    <tr>
+                      <th>Empresa</th>
+                      <th>Domínio</th>
+                      <th>Plano</th>
+                      <th>Status</th>
+                      <th>Provisionamento</th>
+                      <th>Mensagens</th>
+                      <th>Tokens</th>
+                      <th>Vencimento</th>
+                    </tr>
+                  </thead>
+                  <tbody id="companies-table"></tbody>
+                </table>
               </div>
             </div>
-            <div class="col-md-6">
-              <label for="config-formality" class="form-label">Nível de formalidade <span id="formality-display" class="badge bg-light text-dark">50</span></label>
-              <input type="range" class="form-range" id="config-formality" min="0" max="100" value="50">
+          </div>
+
+          <div id="preview-card" class="card shadow-sm mb-4 d-none">
+            <div class="card-body">
+              <div class="d-flex justify-content-between align-items-center">
+                <h5 class="card-title mb-0">Pré-visualização de resposta</h5>
+                <span class="badge bg-secondary" id="preview-intention">Intenção: -</span>
+              </div>
+              <p class="mt-3 mb-0 text-muted" id="preview-message">Aguarde carregar as preferências...</p>
             </div>
-            <div class="col-md-6">
-              <label for="config-empathy" class="form-label">Grau de empatia <span id="empathy-display" class="badge bg-light text-dark">70</span></label>
-              <input type="range" class="form-range" id="config-empathy" min="0" max="100" value="70">
-            </div>
-            <div class="col-md-4 d-flex align-items-end">
-              <div class="form-check form-switch">
-                <input class="form-check-input" type="checkbox" id="config-humor" checked>
-                <label class="form-check-label" for="config-humor">
-                  Humor adaptativo
-                </label>
+          </div>
+
+          <div id="lista" class="row g-3"></div>
+        </div>
+
+        <div class="tab-pane fade" id="painel-analytics" role="tabpanel" aria-labelledby="tab-analytics">
+          <div id="analytics-login-hint" class="alert alert-info d-none">
+            Faça login para visualizar os relatórios de consumo.
+          </div>
+          <div id="analytics-content" class="d-none">
+            <div class="card shadow-sm mb-4">
+              <div class="card-body">
+                <div class="d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-3">
+                  <h5 class="card-title mb-0">Visão geral de consumo</h5>
+                  <div class="d-flex flex-column flex-md-row align-items-md-center gap-2">
+                    <select id="analytics-period-select" class="form-select form-select-sm w-auto">
+                      <option value="week" selected>Últimos 7 dias</option>
+                      <option value="month">Últimas 8 semanas</option>
+                    </select>
+                    <div class="btn-group btn-group-sm" role="group">
+                      <button id="btn-export-csv" class="btn btn-outline-primary" type="button">Exportar CSV</button>
+                      <button id="btn-export-pdf" class="btn btn-outline-secondary" type="button">Exportar PDF</button>
+                    </div>
+                  </div>
+                </div>
+                <div id="analytics-alert" class="alert alert-warning mt-3 d-none" role="alert"></div>
+                <div class="row row-cols-1 row-cols-md-4 g-3 mt-2">
+                  <div class="col">
+                    <div class="border rounded p-3 bg-light h-100">
+                      <div class="small text-muted text-uppercase">Mensagens</div>
+                      <div class="h4 mb-0" id="analytics-messages-total">-</div>
+                    </div>
+                  </div>
+                  <div class="col">
+                    <div class="border rounded p-3 bg-light h-100">
+                      <div class="small text-muted text-uppercase">Tokens</div>
+                      <div class="h4 mb-0" id="analytics-tokens-total">-</div>
+                    </div>
+                  </div>
+                  <div class="col">
+                    <div class="border rounded p-3 bg-light h-100">
+                      <div class="small text-muted text-uppercase">Tempo médio de resposta</div>
+                      <div class="h4 mb-0" id="analytics-response-time">-</div>
+                    </div>
+                  </div>
+                  <div class="col">
+                    <div class="border rounded p-3 bg-light h-100">
+                      <div class="small text-muted text-uppercase">Custo estimado</div>
+                      <div class="h4 mb-0" id="analytics-cost-total">-</div>
+                    </div>
+                  </div>
+                </div>
+                <div class="mt-4">
+                  <div class="small text-muted mb-1">Uso do plano</div>
+                  <div class="progress" style="height: 18px;">
+                    <div id="analytics-messages-progress" class="progress-bar bg-primary" role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+                    <div id="analytics-tokens-progress" class="progress-bar bg-success" role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+                  </div>
+                  <div class="small text-muted mt-2" id="analytics-plan-limit">-</div>
+                </div>
               </div>
             </div>
-            <div class="col-12">
-              <label for="config-phrases" class="form-label">Frases iniciais (uma por linha)</label>
-              <textarea class="form-control" id="config-phrases" rows="3" placeholder="Olá!\nComo posso ajudar?\nConta comigo!"></textarea>
+
+            <div class="card shadow-sm mb-4">
+              <div class="card-body">
+                <h5 class="card-title">Tendências</h5>
+                <div class="row g-4">
+                  <div class="col-lg-6">
+                    <h6 class="text-muted">Mensagens</h6>
+                    <canvas id="analytics-messages-chart" height="200"></canvas>
+                  </div>
+                  <div class="col-lg-6">
+                    <h6 class="text-muted">Tokens</h6>
+                    <canvas id="analytics-tokens-chart" height="200"></canvas>
+                  </div>
+                  <div class="col-lg-6">
+                    <h6 class="text-muted">Tempo médio de resposta</h6>
+                    <canvas id="analytics-response-chart" height="200"></canvas>
+                  </div>
+                  <div class="col-lg-6">
+                    <h6 class="text-muted">Custo estimado</h6>
+                    <canvas id="analytics-cost-chart" height="200"></canvas>
+                  </div>
+                </div>
+              </div>
             </div>
-            <div class="col-12 d-flex justify-content-end">
-              <button type="submit" class="btn btn-success">Salvar ajustes</button>
+
+            <div class="card shadow-sm mb-4">
+              <div class="card-body">
+                <h5 class="card-title">Alertas recentes</h5>
+                <ul id="analytics-alerts-list" class="list-group list-group-flush">
+                  <li class="list-group-item text-muted">Nenhum alerta registrado.</li>
+                </ul>
+              </div>
             </div>
-          </form>
-        </div>
-      </div>
-
-      <div id="companies-card" class="card shadow-sm mb-4 d-none">
-        <div class="card-body">
-          <div class="d-flex justify-content-between align-items-center mb-3">
-            <h5 class="card-title mb-0">Empresas e planos</h5>
-            <span class="badge bg-primary" id="companies-count">0 empresas</span>
-          </div>
-          <div class="table-responsive">
-            <table class="table table-sm table-striped">
-              <thead>
-                <tr>
-                  <th>Empresa</th>
-                  <th>Domínio</th>
-                  <th>Plano</th>
-                  <th>Status</th>
-                  <th>Provisionamento</th>
-                  <th>Mensagens</th>
-                  <th>Tokens</th>
-                  <th>Vencimento</th>
-                </tr>
-              </thead>
-              <tbody id="companies-table"></tbody>
-            </table>
           </div>
         </div>
       </div>
-
-      <div id="preview-card" class="card shadow-sm mb-4 d-none">
-        <div class="card-body">
-          <div class="d-flex justify-content-between align-items-center">
-            <h5 class="card-title mb-0">Pré-visualização de resposta</h5>
-            <span class="badge bg-secondary" id="preview-intention">Intenção: -</span>
-          </div>
-          <p class="mt-3 mb-0 text-muted" id="preview-message">Aguarde carregar as preferências...</p>
-        </div>
-      </div>
-
-      <div id="lista" class="row g-3"></div>
     </div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" crossorigin="anonymous"></script>
     <script>
       let authToken = localStorage.getItem('panel_token') || '';
       let currentCompanyId = parseInt(localStorage.getItem('panel_company_id') || '0', 10) || null;
@@ -206,6 +332,26 @@
       if (companyIdInput && currentCompanyId) {
         companyIdInput.value = currentCompanyId;
       }
+      const analyticsLoginHint = document.getElementById('analytics-login-hint');
+      const analyticsContent = document.getElementById('analytics-content');
+      const analyticsAlertBox = document.getElementById('analytics-alert');
+      const analyticsAlertsList = document.getElementById('analytics-alerts-list');
+      const analyticsPeriodSelect = document.getElementById('analytics-period-select');
+      const analyticsSummaryFields = {
+        messages: document.getElementById('analytics-messages-total'),
+        tokens: document.getElementById('analytics-tokens-total'),
+        response: document.getElementById('analytics-response-time'),
+        cost: document.getElementById('analytics-cost-total'),
+        plan: document.getElementById('analytics-plan-limit'),
+        messagesProgress: document.getElementById('analytics-messages-progress'),
+        tokensProgress: document.getElementById('analytics-tokens-progress'),
+      };
+      const analyticsExportButtons = {
+        csv: document.getElementById('btn-export-csv'),
+        pdf: document.getElementById('btn-export-pdf'),
+      };
+      let analyticsCharts = {};
+      let analyticsHistoryPeriod = analyticsPeriodSelect ? analyticsPeriodSelect.value : 'week';
       const toneInputs = document.querySelectorAll('#tone-group input[type="radio"]');
       const formalityRange = document.getElementById('config-formality');
       const empathyRange = document.getElementById('config-empathy');
@@ -432,6 +578,303 @@
         previewCard.classList.remove('d-none');
       }
 
+      function formatCurrency(value) {
+        const amount = Number(value || 0);
+        return amount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+      }
+
+      function resetAnalyticsUI() {
+        if (analyticsSummaryFields.messages) {
+          analyticsSummaryFields.messages.textContent = '-';
+        }
+        if (analyticsSummaryFields.tokens) {
+          analyticsSummaryFields.tokens.textContent = '-';
+        }
+        if (analyticsSummaryFields.response) {
+          analyticsSummaryFields.response.textContent = '-';
+        }
+        if (analyticsSummaryFields.cost) {
+          analyticsSummaryFields.cost.textContent = '-';
+        }
+        if (analyticsSummaryFields.plan) {
+          analyticsSummaryFields.plan.textContent = '-';
+        }
+        if (analyticsSummaryFields.messagesProgress) {
+          analyticsSummaryFields.messagesProgress.style.width = '0%';
+          analyticsSummaryFields.messagesProgress.setAttribute('aria-valuenow', '0');
+        }
+        if (analyticsSummaryFields.tokensProgress) {
+          analyticsSummaryFields.tokensProgress.style.width = '0%';
+          analyticsSummaryFields.tokensProgress.setAttribute('aria-valuenow', '0');
+        }
+        if (analyticsAlertsList) {
+          analyticsAlertsList.innerHTML = '<li class="list-group-item text-muted">Nenhum alerta registrado.</li>';
+        }
+        Object.keys(analyticsCharts).forEach((key) => {
+          if (analyticsCharts[key] && typeof analyticsCharts[key].destroy === 'function') {
+            analyticsCharts[key].destroy();
+          }
+        });
+        analyticsCharts = {};
+        if (analyticsAlertBox) {
+          analyticsAlertBox.classList.add('d-none');
+          analyticsAlertBox.textContent = '';
+        }
+      }
+
+      function renderAnalyticsAlerts(alerts) {
+        if (!analyticsAlertsList) {
+          return;
+        }
+        if (!Array.isArray(alerts) || alerts.length === 0) {
+          analyticsAlertsList.innerHTML = '<li class="list-group-item text-muted">Nenhum alerta registrado.</li>';
+          if (analyticsAlertBox) {
+            analyticsAlertBox.classList.add('d-none');
+            analyticsAlertBox.textContent = '';
+          }
+          return;
+        }
+        analyticsAlertsList.innerHTML = alerts
+          .map((alert) => {
+            const level = String(alert.level || '').toLowerCase();
+            const badgeClass = level === 'critical' ? 'bg-danger' : level === 'warning' ? 'bg-warning text-dark' : 'bg-secondary';
+            const message = level === 'critical' ? 'Limite atingido' : level === 'warning' ? 'Uso próximo do limite' : 'Alerta';
+            const timestamp = alert.timestamp ? new Date(alert.timestamp).toLocaleString('pt-BR') : '-';
+            const messagesRatio = Math.round(Number(alert.messages_ratio || 0) * 100);
+            const tokensRatio = Math.round(Number(alert.tokens_ratio || 0) * 100);
+            return `
+              <li class="list-group-item d-flex justify-content-between align-items-center">
+                <div>
+                  <div class="fw-semibold">${message}</div>
+                  <div class="small text-muted">Mensagens: ${messagesRatio}% · Tokens: ${tokensRatio}%</div>
+                </div>
+                <span class="badge ${badgeClass}">${timestamp}</span>
+              </li>
+            `;
+          })
+          .join('');
+        if (analyticsAlertBox) {
+          const latest = alerts[0] || {};
+          const latestLevel = String(latest.level || '').toLowerCase();
+          if (latestLevel === 'critical') {
+            analyticsAlertBox.className = 'alert alert-danger mt-3';
+            analyticsAlertBox.textContent = 'O limite do plano foi atingido. Avalie um upgrade para evitar interrupções.';
+            analyticsAlertBox.classList.remove('d-none');
+          } else if (latestLevel === 'warning') {
+            analyticsAlertBox.className = 'alert alert-warning mt-3';
+            analyticsAlertBox.textContent = 'Uso próximo do limite do plano. Monitore o consumo ou ajuste seu plano.';
+            analyticsAlertBox.classList.remove('d-none');
+          } else {
+            analyticsAlertBox.classList.add('d-none');
+            analyticsAlertBox.textContent = '';
+          }
+        }
+      }
+
+      function updateChart(chartKey, canvasId, labels, label, data, color) {
+        const canvas = document.getElementById(canvasId);
+        if (!canvas || typeof Chart === 'undefined') {
+          return;
+        }
+        const dataset = {
+          label,
+          data,
+          borderColor: color,
+          backgroundColor: `${color}33`,
+          tension: 0.25,
+          fill: true,
+          pointRadius: 3,
+        };
+        if (!analyticsCharts[chartKey]) {
+          analyticsCharts[chartKey] = new Chart(canvas, {
+            type: 'line',
+            data: { labels, datasets: [dataset] },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: { legend: { display: false } },
+              scales: { y: { beginAtZero: true } },
+            },
+          });
+        } else {
+          analyticsCharts[chartKey].data.labels = labels;
+          analyticsCharts[chartKey].data.datasets[0].data = data;
+          analyticsCharts[chartKey].update();
+        }
+      }
+
+      function renderAnalyticsHistory(history) {
+        const data = Array.isArray(history && history.data) ? history.data : [];
+        if (data.length === 0) {
+          Object.keys(analyticsCharts).forEach((key) => {
+            if (analyticsCharts[key]) {
+              analyticsCharts[key].data.labels = [];
+              analyticsCharts[key].data.datasets[0].data = [];
+              analyticsCharts[key].update();
+            }
+          });
+          return;
+        }
+        const labels = data.map((item) => {
+          if (!item || !item.period_start) {
+            return '-';
+          }
+          const start = new Date(item.period_start);
+          if (analyticsHistoryPeriod === 'month' && item.period_end) {
+            const end = new Date(item.period_end);
+            return `${start.toLocaleDateString('pt-BR')} - ${end.toLocaleDateString('pt-BR')}`;
+          }
+          return start.toLocaleDateString('pt-BR');
+        });
+        const messagesSeries = data.map((item) => Number(item.messages_inbound || 0) + Number(item.messages_outbound || 0));
+        const tokensSeries = data.map((item) => Number(item.tokens_inbound || 0) + Number(item.tokens_outbound || 0));
+        const responseSeries = data.map((item) => Number(item.average_response_time || 0));
+        const costSeries = data.map((item) => Number(item.estimated_cost || 0));
+        updateChart('messages', 'analytics-messages-chart', labels, 'Mensagens', messagesSeries, '#0d6efd');
+        updateChart('tokens', 'analytics-tokens-chart', labels, 'Tokens', tokensSeries, '#198754');
+        updateChart('response', 'analytics-response-chart', labels, 'Tempo médio (s)', responseSeries, '#6c757d');
+        updateChart('cost', 'analytics-cost-chart', labels, 'Custo', costSeries, '#dc3545');
+      }
+
+      function renderAnalyticsSummary(summary) {
+        if (!summary || !summary.current_usage) {
+          resetAnalyticsUI();
+          return;
+        }
+        const usage = summary.current_usage;
+        const plan = summary.plan || {};
+        const messagesTotal = Number(usage.messages_total ?? usage.messages ?? 0);
+        const tokensTotal = Number(usage.tokens_total ?? usage.tokens ?? 0);
+        const responseAverage = Number(usage.average_response_time ?? 0);
+        const costEstimated = Number(usage.cost_estimated ?? 0);
+        if (analyticsSummaryFields.messages) {
+          analyticsSummaryFields.messages.textContent = messagesTotal.toLocaleString('pt-BR');
+        }
+        if (analyticsSummaryFields.tokens) {
+          analyticsSummaryFields.tokens.textContent = tokensTotal.toLocaleString('pt-BR');
+        }
+        if (analyticsSummaryFields.response) {
+          analyticsSummaryFields.response.textContent = `${responseAverage.toFixed(2)} s`;
+        }
+        if (analyticsSummaryFields.cost) {
+          analyticsSummaryFields.cost.textContent = formatCurrency(costEstimated);
+        }
+        const messagesLimit = Number(plan.limite_mensagens ?? plan.message_limit ?? 0);
+        const tokensLimit = Number(plan.limite_tokens ?? plan.token_limit ?? 0);
+        let limitLabel = 'Sem limites definidos no plano.';
+        let messagesPercent = 0;
+        let tokensPercent = 0;
+        if (messagesLimit > 0 || tokensLimit > 0) {
+          const messagesLabel = messagesLimit > 0
+            ? `${messagesTotal.toLocaleString('pt-BR')} de ${messagesLimit.toLocaleString('pt-BR')} mensagens`
+            : 'Mensagens ilimitadas';
+          const tokensLabel = tokensLimit > 0
+            ? `${tokensTotal.toLocaleString('pt-BR')} de ${tokensLimit.toLocaleString('pt-BR')} tokens`
+            : 'Tokens ilimitados';
+          limitLabel = `${messagesLabel} · ${tokensLabel}`;
+        }
+        if (messagesLimit > 0) {
+          messagesPercent = Math.min(100, Math.round((messagesTotal / messagesLimit) * 100));
+        }
+        if (tokensLimit > 0) {
+          tokensPercent = Math.min(100, Math.round((tokensTotal / tokensLimit) * 100));
+        }
+        if (analyticsSummaryFields.plan) {
+          analyticsSummaryFields.plan.textContent = limitLabel;
+        }
+        if (analyticsSummaryFields.messagesProgress) {
+          analyticsSummaryFields.messagesProgress.style.width = `${messagesPercent}%`;
+          analyticsSummaryFields.messagesProgress.setAttribute('aria-valuenow', String(messagesPercent));
+        }
+        if (analyticsSummaryFields.tokensProgress) {
+          analyticsSummaryFields.tokensProgress.style.width = `${tokensPercent}%`;
+          analyticsSummaryFields.tokensProgress.setAttribute('aria-valuenow', String(tokensPercent));
+        }
+        renderAnalyticsAlerts(summary.alerts || []);
+      }
+
+      async function carregarAnalytics() {
+        if (!analyticsContent || !analyticsLoginHint) {
+          return;
+        }
+        if (!authToken || !currentCompanyId) {
+          analyticsContent.classList.add('d-none');
+          analyticsLoginHint.classList.remove('d-none');
+          resetAnalyticsUI();
+          return;
+        }
+        analyticsLoginHint.classList.add('d-none');
+        analyticsContent.classList.remove('d-none');
+        try {
+          const [summaryResponse, historyResponse] = await Promise.all([
+            fetch(`/api/analytics/summary?company_id=${encodeURIComponent(currentCompanyId)}`, {
+              headers: { Authorization: `Bearer ${authToken}` },
+            }),
+            fetch(`/api/analytics/history?company_id=${encodeURIComponent(currentCompanyId)}&period=${encodeURIComponent(analyticsHistoryPeriod)}`, {
+              headers: { Authorization: `Bearer ${authToken}` },
+            }),
+          ]);
+          if (summaryResponse.status === 401 || historyResponse.status === 401) {
+            setAuthToken('');
+            throw new Error('Sessão expirada. Faça login novamente.');
+          }
+          if (!summaryResponse.ok) {
+            throw new Error('Não foi possível carregar o resumo de analytics.');
+          }
+          if (!historyResponse.ok) {
+            throw new Error('Não foi possível carregar o histórico de consumo.');
+          }
+          const summary = await summaryResponse.json();
+          const history = await historyResponse.json();
+          renderAnalyticsSummary(summary);
+          renderAnalyticsHistory(history);
+        } catch (erro) {
+          resetAnalyticsUI();
+          if (analyticsAlertBox) {
+            analyticsAlertBox.className = 'alert alert-danger mt-3';
+            analyticsAlertBox.textContent = erro.message || 'Falha ao carregar analytics.';
+            analyticsAlertBox.classList.remove('d-none');
+          }
+        }
+      }
+
+      async function exportAnalytics(format) {
+        if (!authToken || !currentCompanyId) {
+          return;
+        }
+        try {
+          const response = await fetch(`/api/analytics/export?company_id=${encodeURIComponent(currentCompanyId)}&format=${encodeURIComponent(format)}`, {
+            headers: { Authorization: `Bearer ${authToken}` },
+          });
+          if (response.status === 401) {
+            setAuthToken('');
+            throw new Error('Sessão expirada. Faça login novamente.');
+          }
+          if (!response.ok) {
+            throw new Error('Não foi possível exportar o relatório.');
+          }
+          const blob = await response.blob();
+          const disposition = response.headers.get('Content-Disposition');
+          let filename = disposition && /filename="?([^";]+)"?/i.test(disposition)
+            ? decodeURIComponent(RegExp.$1)
+            : `analytics.${format}`;
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = filename;
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          URL.revokeObjectURL(url);
+        } catch (erro) {
+          if (analyticsAlertBox) {
+            analyticsAlertBox.className = 'alert alert-danger mt-3';
+            analyticsAlertBox.textContent = erro.message || 'Falha ao exportar relatório.';
+            analyticsAlertBox.classList.remove('d-none');
+          }
+        }
+      }
+
       function setAuthToken(token, companyId = currentCompanyId) {
         authToken = token;
         const logoutButton = document.getElementById('btn-logout');
@@ -472,6 +915,11 @@
           document.getElementById('companies-card').classList.add('d-none');
           document.getElementById('companies-table').innerHTML = '';
           document.getElementById('companies-count').textContent = '0 empresas';
+          if (analyticsContent && analyticsLoginHint) {
+            analyticsContent.classList.add('d-none');
+            analyticsLoginHint.classList.remove('d-none');
+          }
+          resetAnalyticsUI();
         }
       }
 
@@ -786,6 +1234,7 @@
               provisionTenantSlugInput.value = generateSlug(companyName);
             }
             await carregarEmpresas();
+            await carregarAnalytics();
           } catch (erro) {
             if (provisionAlert) {
               provisionAlert.className = 'alert alert-danger';
@@ -800,6 +1249,18 @@
         carregar();
         carregarConfig();
         carregarEmpresas();
+        carregarAnalytics();
+      });
+      if (analyticsPeriodSelect) {
+        analyticsPeriodSelect.addEventListener('change', () => {
+          analyticsHistoryPeriod = analyticsPeriodSelect.value || 'week';
+          carregarAnalytics();
+        });
+      }
+      Object.entries(analyticsExportButtons).forEach(([format, button]) => {
+        if (button) {
+          button.addEventListener('click', () => exportAnalytics(format));
+        }
       });
       toneInputs.forEach((input) => {
         input.addEventListener('change', (event) => {
@@ -858,6 +1319,7 @@
           await carregar();
           await carregarConfig();
           await carregarEmpresas();
+          await carregarAnalytics();
         } catch (erro) {
           alerta.textContent = erro.message;
           alerta.classList.remove('d-none');
@@ -934,6 +1396,7 @@
       carregar();
       carregarConfig();
       carregarEmpresas();
+      carregarAnalytics();
     </script>
   </body>
 </html>

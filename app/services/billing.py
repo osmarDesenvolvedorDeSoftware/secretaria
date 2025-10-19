@@ -1,25 +1,124 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any
+from decimal import Decimal, ROUND_HALF_UP
+from typing import Any, TYPE_CHECKING
 
 import structlog
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.models import Company, Plan, Subscription
 from app.services.tenancy import namespaced_key
+
+
+if TYPE_CHECKING:  # pragma: no cover - hint only
+    from app.services.analytics_service import AnalyticsService
 
 
 class BillingService:
     """Serviço utilitário para gerenciar assinaturas e integrações de cobrança."""
 
-    def __init__(self, session_factory, redis_client=None) -> None:
+    def __init__(self, session_factory, redis_client=None, analytics_service: "AnalyticsService | None" = None) -> None:
         self.session_factory = session_factory
         self.logger = structlog.get_logger().bind(service="billing")
         self.redis = redis_client
+        self.analytics_service: "AnalyticsService | None" = analytics_service
 
     def _session(self) -> Session:
         return self.session_factory()  # type: ignore[call-arg]
+
+    def attach_analytics_service(self, analytics_service: "AnalyticsService") -> None:
+        self.analytics_service = analytics_service
+
+    @staticmethod
+    def _usage_key(company_id: int) -> str:
+        return namespaced_key(company_id, "usage")
+
+    @staticmethod
+    def _calculate_cost(
+        inbound_messages: int = 0,
+        outbound_messages: int = 0,
+        inbound_tokens: int = 0,
+        outbound_tokens: int = 0,
+    ) -> float:
+        total_messages = inbound_messages + outbound_messages
+        total_tokens = inbound_tokens + outbound_tokens
+        message_cost = Decimal(total_messages) * Decimal(str(settings.billing_cost_per_message))
+        token_cost = (Decimal(total_tokens) / Decimal(1000)) * Decimal(
+            str(settings.billing_cost_per_thousand_tokens)
+        )
+        return float((message_cost + token_cost).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP))
+
+    def _update_usage_hash(
+        self,
+        company_id: int,
+        *,
+        inbound_messages: int = 0,
+        outbound_messages: int = 0,
+        inbound_tokens: int = 0,
+        outbound_tokens: int = 0,
+        response_time: float | None = None,
+        cost: float | None = None,
+    ) -> None:
+        if self.redis is None:
+            return
+        key = self._usage_key(company_id)
+        try:
+            if inbound_messages:
+                self.redis.hincrby(key, "messages_inbound", int(inbound_messages))
+            if outbound_messages:
+                self.redis.hincrby(key, "messages_outbound", int(outbound_messages))
+            if inbound_tokens:
+                self.redis.hincrby(key, "tokens_inbound", int(inbound_tokens))
+            if outbound_tokens:
+                self.redis.hincrby(key, "tokens_outbound", int(outbound_tokens))
+            if response_time is not None:
+                self.redis.hincrbyfloat(key, "response_time_total", float(response_time))
+                self.redis.hincrby(key, "response_count", 1)
+            if cost:
+                self.redis.hincrbyfloat(key, "cost_estimated", float(cost))
+            self.redis.hset(key, mapping={"updated_at": datetime.utcnow().isoformat()})
+        except Exception:
+            self.logger.warning("billing_usage_update_failed", company_id=company_id)
+
+    def record_usage(
+        self,
+        company_id: int,
+        *,
+        inbound_messages: int = 0,
+        outbound_messages: int = 0,
+        inbound_tokens: int = 0,
+        outbound_tokens: int = 0,
+        response_time: float | None = None,
+    ) -> float:
+        if self.analytics_service is not None:
+            cost = self.analytics_service.record_usage(
+                company_id,
+                inbound_messages=inbound_messages,
+                outbound_messages=outbound_messages,
+                inbound_tokens=inbound_tokens,
+                outbound_tokens=outbound_tokens,
+                response_time=response_time,
+            )
+            return cost
+
+        cost = self._calculate_cost(
+            inbound_messages=inbound_messages,
+            outbound_messages=outbound_messages,
+            inbound_tokens=inbound_tokens,
+            outbound_tokens=outbound_tokens,
+        )
+        self._update_usage_hash(
+            company_id,
+            inbound_messages=inbound_messages,
+            outbound_messages=outbound_messages,
+            inbound_tokens=inbound_tokens,
+            outbound_tokens=outbound_tokens,
+            response_time=response_time,
+            cost=cost,
+        )
+        return cost
 
     @staticmethod
     def _normalize_subscription_status(status: str | None) -> str:
@@ -187,7 +286,7 @@ class BillingService:
                 .order_by(Subscription.started_at.desc())
                 .first()
             )
-            usage: dict[str, int] = {}
+            usage: dict[str, float] = {}
             provisioning: dict[str, str] = {}
             domain_info: dict[str, str] = {}
             infrastructure: dict[str, str] = {}
@@ -212,12 +311,15 @@ class BillingService:
                     usage_raw = self.redis.hgetall(usage_key)
                     if isinstance(usage_raw, dict):
                         decoded_usage = _decode_map(usage_raw)
-                        parsed_usage: dict[str, int] = {}
+                        parsed_usage: dict[str, float] = {}
                         for key, value in decoded_usage.items():
                             try:
                                 parsed_usage[key] = int(value)
                             except (TypeError, ValueError):
-                                continue
+                                try:
+                                    parsed_usage[key] = float(value)
+                                except (TypeError, ValueError):
+                                    continue
                         usage = parsed_usage
                 except Exception:
                     usage = {}
@@ -247,6 +349,45 @@ class BillingService:
                     worker_count = int(self.redis.scard(namespaced_key(company_id, "workers")))
                 except Exception:
                     worker_count = 0
+            inbound_messages = int(usage.get("messages_inbound", 0)) if usage else 0
+            outbound_messages = int(usage.get("messages_outbound", 0)) if usage else 0
+            inbound_tokens = int(usage.get("tokens_inbound", 0)) if usage else 0
+            outbound_tokens = int(usage.get("tokens_outbound", 0)) if usage else 0
+            total_messages = inbound_messages + outbound_messages
+            total_tokens = inbound_tokens + outbound_tokens
+            if usage:
+                usage.setdefault("messages_total", total_messages)
+                usage.setdefault("tokens_total", total_tokens)
+                usage.setdefault("messages", usage.get("messages_total", total_messages))
+                usage.setdefault("tokens", usage.get("tokens_total", total_tokens))
+                if "cost_estimated" in usage:
+                    usage["cost_estimated"] = float(usage.get("cost_estimated", 0))
+                response_total = float(usage.get("response_time_total", 0))
+                response_count = float(usage.get("response_count", 0))
+                usage["average_response_time"] = (
+                    round(response_total / response_count, 4) if response_count else 0.0
+                )
+            else:
+                usage = {
+                    "messages_total": total_messages,
+                    "tokens_total": total_tokens,
+                    "messages": total_messages,
+                    "tokens": total_tokens,
+                    "average_response_time": 0.0,
+                    "cost_estimated": 0.0,
+                }
+
+            analytics_summary = None
+            if self.analytics_service is not None:
+                try:
+                    analytics_summary = self.analytics_service.get_summary(company.id)
+                except Exception as exc:
+                    self.logger.warning(
+                        "billing_analytics_summary_failed",
+                        company_id=company.id,
+                        error=str(exc),
+                    )
+
             return {
                 "company_id": company.id,
                 "company_name": company.name,
@@ -259,6 +400,7 @@ class BillingService:
                 "domains": domain_info,
                 "infrastructure": infrastructure,
                 "worker_count": worker_count,
+                "analytics": analytics_summary,
             }
         finally:
             session.close()

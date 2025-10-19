@@ -36,6 +36,11 @@ class Company(Base):
     )
     conversations = relationship("Conversation", back_populates="company")
     delivery_logs = relationship("DeliveryLog", back_populates="company")
+    analytics_reports = relationship(
+        "AnalyticsReport",
+        back_populates="company",
+        cascade="all, delete-orphan",
+    )
 
     def __repr__(self) -> str:  # pragma: no cover - utilitário de debug
         return f"<Company id={self.id} name={self.name!r} domain={self.domain!r}>"

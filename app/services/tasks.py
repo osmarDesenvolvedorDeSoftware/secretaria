@@ -20,6 +20,8 @@ from app.metrics import (
     whaticket_send_success_total,
 )
 from app.config import settings
+from app.services.analytics_service import AnalyticsService
+from app.services.billing import BillingService
 from app.services.context_engine import ContextEngine, RuntimeContext
 from app.services.llm import LLMClient
 from app.services.persistence import (
@@ -38,6 +40,8 @@ class TaskService:
         tenant: TenantContext,
         queue: Queue,
         dead_letter_queue: Queue | None = None,
+        billing_service: BillingService | None = None,
+        analytics_service: AnalyticsService | None = None,
     ) -> None:
         self.redis = redis_client
         self.session_factory = session_factory
@@ -52,13 +56,20 @@ class TaskService:
             queue_name_for_company(settings.dead_letter_queue_name, tenant.company_id),
             connection=redis_client,
         )
-        self.usage_key = tenant.namespaced_key("usage")
-
-    def _increment_usage(self, field: str, amount: int) -> None:
-        try:
-            self.redis.hincrby(self.usage_key, field, amount)
-        except Exception:
-            pass
+        self.analytics_service = analytics_service
+        if billing_service is None:
+            billing_service = BillingService(
+                session_factory,
+                redis_client,
+                analytics_service,
+            )
+        else:
+            if analytics_service is None and getattr(billing_service, "analytics_service", None) is not None:
+                analytics_service = billing_service.analytics_service  # type: ignore[attr-defined]
+            elif analytics_service is not None:
+                billing_service.attach_analytics_service(analytics_service)
+        self.analytics_service = analytics_service or getattr(billing_service, "analytics_service", None)
+        self.billing_service = billing_service
 
     def get_context(self, number: str) -> list[dict[str, str]]:
         return self.context_engine.get_history(number)
@@ -141,7 +152,24 @@ def process_incoming_message(
     tenant = TenantContext(company_id=company_id, label=str(company_id))
     queue = current_app.get_task_queue(company_id)  # type: ignore[attr-defined]
     dead_letter_queue = current_app.get_dead_letter_queue(company_id)  # type: ignore[attr-defined]
-    service = TaskService(redis_client, session_factory, tenant, queue, dead_letter_queue)
+    analytics_service = getattr(current_app, "analytics_service", None)
+    billing_service = getattr(current_app, "billing_service", None)
+    if billing_service is None:
+        billing_service = BillingService(
+            session_factory,
+            redis_client,
+            analytics_service,
+        )
+        current_app.billing_service = billing_service  # type: ignore[attr-defined]
+    service = TaskService(
+        redis_client,
+        session_factory,
+        tenant,
+        queue,
+        dead_letter_queue,
+        billing_service=billing_service,
+        analytics_service=analytics_service,
+    )
 
     job = get_current_job()
     attempt = 1
@@ -175,14 +203,18 @@ def process_incoming_message(
                 company=service.company_label,
                 kind=kind or "unknown",
             ).inc()
-            service._increment_usage("messages_inbound", 1)
+            inbound_tokens = 0
             if sanitized:
                 inbound_tokens = max(len(sanitized.split()), 1)
                 token_usage_total.labels(
                     company=service.company_label,
                     direction="inbound",
                 ).inc(inbound_tokens)
-                service._increment_usage("tokens_inbound", inbound_tokens)
+            service.billing_service.record_usage(
+                service.company_id,
+                inbound_messages=1,
+                inbound_tokens=inbound_tokens,
+            )
             runtime_context = service.context_engine.prepare_runtime_context(number, sanitized)
             history_messages = list(runtime_context.history)
             context_messages_for_db = list(history_messages)
@@ -235,18 +267,25 @@ def process_incoming_message(
 
             context_messages_for_db.append({"role": "user", "body": user_message})
             context_messages_for_db.append({"role": "assistant", "body": final_message})
+            response_time_for_analytics: float | None = None
+            outbound_tokens = 0
             if final_message:
                 message_usage_total.labels(
                     company=service.company_label,
                     kind="assistant",
                 ).inc()
-                service._increment_usage("messages_outbound", 1)
                 outbound_tokens = max(len(final_message.split()), 1)
                 token_usage_total.labels(
                     company=service.company_label,
                     direction="outbound",
                 ).inc(outbound_tokens)
-                service._increment_usage("tokens_outbound", outbound_tokens)
+                response_time_for_analytics = time.time() - start_time
+                service.billing_service.record_usage(
+                    service.company_id,
+                    outbound_messages=1,
+                    outbound_tokens=outbound_tokens,
+                    response_time=response_time_for_analytics,
+                )
 
             whaticket_start = time.time()
             external_id = None
