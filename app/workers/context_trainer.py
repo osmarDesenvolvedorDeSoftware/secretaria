@@ -8,8 +8,9 @@ from sqlalchemy.orm import Session
 
 from app import init_app
 from app.metrics import context_learning_updates_total, context_volume_gauge
-from app.models import Conversation
+from app.models import Company, Conversation
 from app.services.context_engine import ContextEngine
+from app.services.tenancy import build_tenant_context
 
 
 class ContextTrainer:
@@ -18,7 +19,14 @@ class ContextTrainer:
         self.redis: Redis = app.redis  # type: ignore[attr-defined]
         self.session_factory = app.db_session  # type: ignore[attr-defined]
         self.logger = structlog.get_logger().bind(worker="context_trainer")
-        self.context_engine = ContextEngine(self.redis, self.session_factory)
+        self.context_engine_cache: dict[int, ContextEngine] = {}
+
+    def _get_engine(self, company: Company, tenant) -> ContextEngine:
+        engine = self.context_engine_cache.get(company.id)
+        if engine is None:
+            engine = ContextEngine(self.redis, self.session_factory, tenant)
+            self.context_engine_cache[company.id] = engine
+        return engine
 
     def _session(self) -> Session:
         return self.session_factory()  # type: ignore[call-arg]
@@ -26,7 +34,23 @@ class ContextTrainer:
     def run(self, limit: int | None = None) -> None:
         session = self._session()
         try:
-            query = session.query(Conversation.number).distinct().order_by(Conversation.number)
+            companies = session.query(Company).order_by(Company.id).all()
+        finally:
+            session.close()
+            self.session_factory.remove()
+
+        for company in companies:
+            self._process_company(company, limit)
+
+    def _process_company(self, company: Company, limit: int | None) -> None:
+        session = self._session()
+        try:
+            query = (
+                session.query(Conversation.number)
+                .filter(Conversation.company_id == company.id)
+                .distinct()
+                .order_by(Conversation.number)
+            )
             if isinstance(limit, int) and limit > 0:
                 query = query.limit(limit)
             numbers = [row[0] for row in query]
@@ -34,17 +58,29 @@ class ContextTrainer:
             session.close()
             self.session_factory.remove()
 
+        tenant = build_tenant_context(company)
+        engine = self._get_engine(company, tenant)
+
         for number in numbers:
             if not number:
                 continue
-            self._process_number(number)
+            self._process_number(engine, tenant.label, company.id, number)
 
-    def _process_number(self, number: str) -> None:
+    def _process_number(
+        self,
+        engine: ContextEngine,
+        company_label: str,
+        company_id: int,
+        number: str,
+    ) -> None:
         session = self._session()
         try:
             conversation = (
                 session.query(Conversation)
-                .filter(Conversation.number == number)
+                .filter(
+                    Conversation.company_id == company_id,
+                    Conversation.number == number,
+                )
                 .order_by(Conversation.updated_at.desc().nullslast(), Conversation.id.desc())
                 .first()
             )
@@ -56,15 +92,16 @@ class ContextTrainer:
             return
 
         messages = conversation.context_json or []
-        profile = self.context_engine.retrain_profile(
+        profile = engine.retrain_profile(
             number,
             messages,
             conversation.user_name,
         )
-        context_learning_updates_total.labels(number=number).inc()
-        context_volume_gauge.labels(number=number).set(len(messages))
+        context_learning_updates_total.labels(company=company_label, number=number).inc()
+        context_volume_gauge.labels(company=company_label, number=number).set(len(messages))
         self.logger.info(
             "context_profile_updated",
+            company_id=company_id,
             number=number,
             topics=profile.get("frequent_topics", []),
             products=profile.get("product_mentions", []),

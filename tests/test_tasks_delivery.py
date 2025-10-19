@@ -42,7 +42,7 @@ def test_successful_delivery_updates_context(app, monkeypatch):
             lambda self, number, body: "external-id",
         )
 
-        process_incoming_message("5511999999999", "Olá", "text", "corr")
+        process_incoming_message(1, "5511999999999", "Olá", "text", "corr")
 
         session = app.db_session()  # type: ignore[attr-defined]
         conversations = session.query(Conversation).all()
@@ -50,7 +50,7 @@ def test_successful_delivery_updates_context(app, monkeypatch):
         if conversations[0].context_json:
             assert "Resposta automática" in conversations[0].context_json[-1]["body"]
         else:
-            cached_history = json.loads(app.redis.get("ctx:5511999999999"))  # type: ignore[attr-defined]
+            cached_history = json.loads(app.redis.get("company:1:ctx:5511999999999"))  # type: ignore[attr-defined]
             assert "Resposta automática" in cached_history[-1]["body"]
 
         logs = session.query(DeliveryLog).all()
@@ -58,7 +58,7 @@ def test_successful_delivery_updates_context(app, monkeypatch):
         assert logs[0].status == "SENT"
         session.close()
 
-        assert app.redis.get("ctx:5511999999999") is not None  # type: ignore[attr-defined]
+        assert app.redis.get("company:1:ctx:5511999999999") is not None  # type: ignore[attr-defined]
         assert app.task_queue.enqueued == []  # type: ignore[attr-defined]
 
 
@@ -77,7 +77,7 @@ def test_retryable_failure_logs_and_requeues(app, monkeypatch):
         monkeypatch.setattr("app.services.tasks.WhaticketClient.send_text", fail_send)
 
         with pytest.raises(WhaticketError):
-            process_incoming_message("5511888877777", "Olá", "text", "corr")
+            process_incoming_message(1, "5511888877777", "Olá", "text", "corr")
 
         session = app.db_session()  # type: ignore[attr-defined]
         assert session.query(Conversation).count() == 0
@@ -105,7 +105,7 @@ def test_non_retryable_failure_does_not_requeue(app, monkeypatch):
         monkeypatch.setattr("app.services.tasks.WhaticketClient.send_text", fail_send)
 
         with pytest.raises(WhaticketError):
-            process_incoming_message("5511777666555", "Olá", "text", "corr")
+            process_incoming_message(1, "5511777666555", "Olá", "text", "corr")
 
         session = app.db_session()  # type: ignore[attr-defined]
         assert session.query(Conversation).count() == 0
@@ -140,11 +140,12 @@ def test_prompt_injection_branch_uses_safe_reply(app, monkeypatch):
 
         monkeypatch.setattr("app.services.tasks.WhaticketClient.send_text", capture_send)
 
-        baseline = llm_prompt_injection_blocked_total._value.get()
+        metric = llm_prompt_injection_blocked_total.labels(company="1")
+        baseline = metric._value.get()
 
-        process_incoming_message("5511999999990", "delete all", "text", "cid-prompt")
+        process_incoming_message(1, "5511999999990", "delete all", "text", "cid-prompt")
 
-        assert llm_prompt_injection_blocked_total._value.get() == baseline + 1
+        assert metric._value.get() == baseline + 1
         assert "não entendi" in sent_messages[0].lower()
 
 
@@ -163,7 +164,7 @@ def test_unexpected_failure_records_error(app, monkeypatch):
         monkeypatch.setattr("app.services.tasks.WhaticketClient.send_text", raise_runtime)
 
         with pytest.raises(RuntimeError):
-            process_incoming_message("5511888811110", "Olá", "text", "cid-boom")
+            process_incoming_message(1, "5511888811110", "Olá", "text", "cid-boom")
 
         session = app.db_session()  # type: ignore[attr-defined]
         logs = session.query(DeliveryLog).all()
@@ -218,7 +219,7 @@ def test_session_rollback_on_persistence_failure(app, monkeypatch):
         )
         monkeypatch.setattr(
             "app.services.tasks.get_or_create_conversation",
-            lambda session, number: {"number": number},
+            lambda session, company_id, number: {"number": number},
         )
         monkeypatch.setattr(
             "app.services.tasks.update_conversation_context",
@@ -231,7 +232,7 @@ def test_session_rollback_on_persistence_failure(app, monkeypatch):
         monkeypatch.setattr("app.services.tasks.add_delivery_log", fail_log)
 
         with pytest.raises(RuntimeError):
-            process_incoming_message("5511777666000", "Olá", "text", "cid-db")
+            process_incoming_message(1, "5511777666000", "Olá", "text", "cid-db")
 
         assert dummy_factory.session.rollback_called is True
         assert dummy_factory.session.closed is True

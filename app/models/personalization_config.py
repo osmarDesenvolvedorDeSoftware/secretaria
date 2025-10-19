@@ -3,15 +3,24 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, Integer, String
+from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy.orm import relationship
 
 from .base import Base
 
 
 class PersonalizationConfig(Base):
     __tablename__ = "personalization_configs"
+    __table_args__ = (
+        UniqueConstraint("company_id", name="uq_personalization_company"),
+    )
 
     id = Column(Integer, primary_key=True)
+    company_id = Column(
+        ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     tone_of_voice = Column(String(64), nullable=False, default="amigavel")
     message_limit = Column(Integer, nullable=False, default=5)
     opening_phrases = Column(JSON, nullable=False, default=list)
@@ -21,6 +30,8 @@ class PersonalizationConfig(Base):
     adaptive_humor = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    company = relationship("Company", back_populates="personalization_configs")
 
     def to_dict(self) -> dict[str, Any]:
         return {

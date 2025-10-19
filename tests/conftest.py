@@ -11,6 +11,7 @@ import app.services.tasks as tasks_module
 import app.services.whaticket as whaticket_module
 from app import init_app
 from app.config import settings as config_settings
+from app.models import Company, Plan
 from app.models.base import Base
 
 
@@ -121,6 +122,13 @@ class DummyRedis:
     def hgetall(self, key: str):
         return dict(self.hashes.get(key, {}))
 
+    def hincrby(self, key: str, field: str, amount: int = 1):
+        data = self.hashes.setdefault(key, {})
+        current = int(data.get(field, 0))
+        current += amount
+        data[field] = current
+        return current
+
 
 class DummyQueue:
     def __init__(self, *args, **kwargs):
@@ -163,6 +171,16 @@ def app(monkeypatch) -> Generator[Flask, None, None]:
     test_app.task_queue = DummyQueue()  # type: ignore[attr-defined]
     Base.metadata.create_all(test_app.db_engine)  # type: ignore[attr-defined]
     with test_app.app_context():
+        session = test_app.db_session()  # type: ignore[attr-defined]
+        try:
+            plan = Plan(name="Starter", limite_mensagens=1000, limite_tokens=500000, preco=0, features=[])
+            session.add(plan)
+            session.flush()
+            company = Company(name="Empresa Teste", domain="teste.local", status="ativo", current_plan_id=plan.id)
+            session.add(company)
+            session.commit()
+        finally:
+            session.close()
         yield test_app
 
 

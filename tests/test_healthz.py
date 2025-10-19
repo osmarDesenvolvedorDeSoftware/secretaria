@@ -23,7 +23,7 @@ def prepare_worker(app):
 
 
 def test_healthz_ok(client):
-    response = client.get("/healthz")
+    response = client.get("/healthz", headers={"X-Company-Domain": ""})
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["status"] == "ok"
@@ -38,7 +38,7 @@ def test_healthz_redis_down(client, app, monkeypatch):
         raise ConnectionError("redis down")
 
     monkeypatch.setattr(app.redis, "ping", fail_ping, raising=False)  # type: ignore[attr-defined]
-    response = client.get("/healthz")
+    response = client.get("/healthz", headers={"X-Company-Domain": ""})
     assert response.status_code == 503
     payload = response.get_json()
     assert payload["status"] == "degraded"
@@ -50,7 +50,9 @@ def test_healthz_postgres_down(client, app, monkeypatch):
         raise RuntimeError("db down")
 
     monkeypatch.setattr(app.db_engine, "connect", fail_connect, raising=False)  # type: ignore[attr-defined]
-    response = client.get("/healthz")
+    monkeypatch.setattr("app.services.tenancy.resolve_company", lambda *args, **kwargs: None)
+    monkeypatch.setitem(app.before_request_funcs, None, [])
+    response = client.get("/healthz", headers={"X-Company-Domain": ""})
     assert response.status_code == 503
     payload = response.get_json()
     assert payload["dependencies"]["postgres"]["status"] == "error"

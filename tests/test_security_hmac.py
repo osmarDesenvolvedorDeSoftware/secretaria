@@ -41,7 +41,11 @@ def test_valid_signature_returns_202(client, monkeypatch):
     response = client.post(
         "/webhook/whaticket",
         data=body,
-        headers={"X-Signature": signature, "X-Timestamp": str(ts)},
+        headers={
+            "X-Signature": signature,
+            "X-Timestamp": str(ts),
+            "X-Company-Domain": "teste.local",
+        },
         content_type="application/json",
     )
 
@@ -59,7 +63,11 @@ def test_timestamp_outside_window(client, monkeypatch):
     response = client.post(
         "/webhook/whaticket",
         data=body,
-        headers={"X-Signature": signature, "X-Timestamp": str(ts)},
+        headers={
+            "X-Signature": signature,
+            "X-Timestamp": str(ts),
+            "X-Company-Domain": "teste.local",
+        },
         content_type="application/json",
     )
 
@@ -75,7 +83,11 @@ def test_invalid_signature(client, monkeypatch):
     response = client.post(
         "/webhook/whaticket",
         data=body,
-        headers={"X-Signature": "bad", "X-Timestamp": str(ts)},
+        headers={
+            "X-Signature": "bad",
+            "X-Timestamp": str(ts),
+            "X-Company-Domain": "teste.local",
+        },
         content_type="application/json",
     )
 

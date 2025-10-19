@@ -1,22 +1,25 @@
 # Secretaria Virtual Whaticket
 
-[![Release](https://img.shields.io/badge/version-v1.0-blue.svg)](docs/release_v1.0.md)
+[![Release](https://img.shields.io/badge/version-v1.1-blue.svg)](docs/release_v1.1.md)
 
 Arquitetura pronta para produção para uma secretária virtual integrada ao Whaticket com Flask, Redis, RQ e PostgreSQL.
 
 ## Visão Geral
 
 - 📄 [Documentação de release v1.0](docs/release_v1.0.md)
+- 📄 [Documentação de release v1.1](docs/release_v1.1.md)
 
+* **Multi-tenancy completo** com isolamento por empresa em banco, Redis, filas RQ e JWT multiempresa.
+* **Gestão de planos e billing** com modelos `Plan`/`Subscription` e `BillingService` com webhooks.
 * **Webhook seguro** com validação HMAC (`X-Signature`) e token opcional (`X-Webhook-Token`).
 * **Persistência** de conversas e logs de entrega em PostgreSQL (SQLAlchemy + Alembic).
-* **Memória de curto prazo** e **rate limiting** via Redis.
+* **Memória de curto prazo** e **rate limiting** via Redis com quotas por tenant.
 * **Fila assíncrona** com RQ para chamadas ao LLM e envio ao Whaticket.
 * **Integração Whaticket** com token estático ou login JWT opcional com cache em Redis.
 * **Cliente Gemini** com retries, timeout e circuit breaker.
-* **Observabilidade** com logs estruturados (structlog) e métricas Prometheus em `/metrics`.
+* **Observabilidade** com logs estruturados (structlog) e métricas Prometheus em `/metrics` segmentadas por empresa.
 * **Segurança** com sanitização, proteção contra prompt-injection e CORS desabilitado no webhook.
-* **Testes** com pytest + coverage e ambiente Docker pronto.
+* **Testes** com pytest + cobertura e ambiente Docker pronto.
 
 ## Requisitos
 
@@ -30,6 +33,13 @@ Arquitetura pronta para produção para uma secretária virtual integrada ao Wha
 2. Execute `make up` para subir o stack (web + worker + redis + postgres).
 3. Rode as migrações com `make upgrade`.
 4. Opcional: `make dev` para desenvolvimento local com auto-reload.
+
+### Multiempresa e Billing
+
+1. Crie ou ajuste planos em `/painel/empresas` e configure limites (`Plan`).
+2. Registre empresas com domínio único e vincule um plano ativo.
+3. Configure o webhook de pagamento no provedor (ex.: Stripe, Mercado Pago ou manual) apontando para `/webhook/billing` com o header `X-Company-Domain`.
+4. Garanta que clientes externos enviem `X-Company-Domain` ou incluam `company_id` no JWT para roteamento correto.
 
 ## Comandos Principais
 
@@ -130,7 +140,9 @@ Expostas em `/metrics` no formato Prometheus com `HELP`/`TYPE` padrão. Destaque
 * `secretaria_llm_errors_total`
 * `secretaria_llm_prompt_injection_blocked_total`
 * `secretaria_healthcheck_failures_total{component="redis|postgres|rq_worker"}`
-* `secretaria_queue_size`
+* `secretaria_queue_size{company_id="..."}`
+* `secretaria_usage_messages_total{company_id="..."}`
+* `secretaria_usage_tokens_total{company_id="..."}`
 
 ### Exemplos `curl`
 
@@ -145,8 +157,8 @@ Veja a árvore completa no repositório para entender os módulos de rotas, serv
 
 ## Observabilidade
 
-* Logs em JSON com `correlation_id`, método, status e duração.
-* Métricas Prometheus para integrar com Grafana/Alertmanager.
+* Logs em JSON com `correlation_id`, método, status, `company_id` e duração.
+* Métricas Prometheus para integrar com Grafana/Alertmanager com labels por empresa e alertas por tenant.
 
 ## Recursos Inteligentes
 

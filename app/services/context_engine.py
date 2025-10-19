@@ -22,6 +22,7 @@ from app.metrics import (
     sentiment_average_gauge,
 )
 from app.models import Conversation, CustomerContext, PersonalizationConfig
+from app.services.tenancy import TenantContext
 
 LOGGER = structlog.get_logger().bind(service="context_engine")
 
@@ -186,9 +187,17 @@ class EmbeddingClient:
 
 
 class ContextEngine:
-    def __init__(self, redis_client: Redis, session_factory) -> None:
+    def __init__(
+        self,
+        redis_client: Redis,
+        session_factory,
+        tenant: TenantContext,
+    ) -> None:
         self.redis = redis_client
         self.session_factory = session_factory
+        self.tenant = tenant
+        self.company_id = tenant.company_id
+        self.company_label = tenant.label
         self.embedding_client = EmbeddingClient()
         self.templates = self._load_templates()
 
@@ -298,7 +307,7 @@ class ContextEngine:
         return "default"
 
     def _update_sentiment_metrics(self, number: str, score: float) -> None:
-        key = f"ctx:sentiment:{number}"
+        key = self.tenant.namespaced_key("ctx", "sentiment", number)
         try:
             pipeline = self.redis.pipeline()
             pipeline.hincrbyfloat(key, "total", score)
@@ -309,14 +318,16 @@ class ContextEngine:
             count = int(results[1]) if len(results) > 1 and results[1] is not None else 1
             if count <= 0:
                 count = 1
-            sentiment_average_gauge.labels(number=number).set(total / count)
+            sentiment_average_gauge.labels(company=self.company_label, number=number).set(
+                total / count
+            )
         except Exception:
             LOGGER.debug("sentiment_metrics_update_failed", number=number)
 
     def _update_feedback_metrics(self, number: str, feedback: str | None) -> None:
         if not feedback:
             return
-        key = f"ctx:satisfaction:{number}"
+        key = self.tenant.namespaced_key("ctx", "satisfaction", number)
         try:
             if feedback == "positive":
                 self.redis.hincrby(key, "positive", 1)
@@ -330,13 +341,19 @@ class ContextEngine:
             negative = int(negative_raw.decode()) if isinstance(negative_raw, (bytes, bytearray)) else int(negative_raw or 0)
             total = positive + negative
             if total > 0:
-                satisfaction_ratio_gauge.labels(number=number).set(positive / total)
+                satisfaction_ratio_gauge.labels(
+                    company=self.company_label,
+                    number=number,
+                ).set(positive / total)
         except Exception:
             LOGGER.debug("feedback_metrics_update_failed", number=number)
 
     def _register_intention_metric(self, intention: str) -> None:
         try:
-            intention_distribution_total.labels(intention=intention or "follow_up").inc()
+            intention_distribution_total.labels(
+                company=self.company_label,
+                intention=intention or "follow_up",
+            ).inc()
         except Exception:
             LOGGER.debug("intention_metric_update_failed", intention=intention)
 
@@ -395,13 +412,13 @@ class ContextEngine:
 
     # Redis helpers ---------------------------------------------------------------------
     def _history_key(self, number: str) -> str:
-        return f"ctx:{number}"
+        return self.tenant.namespaced_key("ctx", number)
 
     def _profile_key(self, number: str) -> str:
-        return f"ctx:profile:{number}"
+        return self.tenant.namespaced_key("ctx", "profile", number)
 
     def _config_key(self) -> str:
-        return "ctx:personalization_config"
+        return self.tenant.namespaced_key("ctx", "personalization_config")
 
     def _load_history(self, number: str) -> list[dict[str, str]]:
         raw = self.redis.get(self._history_key(number))
@@ -420,7 +437,10 @@ class ContextEngine:
         try:
             statement = (
                 select(Conversation)
-                .where(Conversation.number == number)
+                .where(
+                    Conversation.company_id == self.company_id,
+                    Conversation.number == number,
+                )
                 .order_by(Conversation.updated_at.desc(), Conversation.id.desc())
             )
             result = session.execute(statement).scalars().first()
@@ -458,7 +478,10 @@ class ContextEngine:
             try:
                 profile = (
                     session.query(CustomerContext)
-                    .filter(CustomerContext.number == number)
+                    .filter(
+                        CustomerContext.company_id == self.company_id,
+                        CustomerContext.number == number,
+                    )
                     .order_by(CustomerContext.id.asc())
                     .first()
                 )
@@ -467,7 +490,13 @@ class ContextEngine:
                 data = self._default_profile(number)
             if data is None:
                 if profile is None:
-                    profile = CustomerContext(number=number, frequent_topics=[], product_mentions=[], preferences={})
+                    profile = CustomerContext(
+                        company_id=self.company_id,
+                        number=number,
+                        frequent_topics=[],
+                        product_mentions=[],
+                        preferences={},
+                    )
                     session.add(profile)
                     session.commit()
                 data = profile.to_dict()
@@ -499,6 +528,7 @@ class ContextEngine:
             try:
                 config = (
                     session.query(PersonalizationConfig)
+                    .filter(PersonalizationConfig.company_id == self.company_id)
                     .order_by(PersonalizationConfig.updated_at.desc().nullslast(), PersonalizationConfig.id.asc())
                     .first()
                 )
@@ -507,7 +537,7 @@ class ContextEngine:
                 data = self._default_config()
             if data is None:
                 if config is None:
-                    config = PersonalizationConfig()
+                    config = PersonalizationConfig(company_id=self.company_id)
                     session.add(config)
                     session.commit()
                 data = config.to_dict()
@@ -740,18 +770,22 @@ class ContextEngine:
             try:
                 record = (
                     session.query(CustomerContext)
-                    .filter(CustomerContext.number == number)
+                    .filter(
+                        CustomerContext.company_id == self.company_id,
+                        CustomerContext.number == number,
+                    )
                     .first()
                 )
             except Exception:
                 record = None
             if record is None:
                 try:
-                    record = CustomerContext(number=number)
+                    record = CustomerContext(company_id=self.company_id, number=number)
                     session.add(record)
                 except Exception:
                     record = None
             if record is not None:
+                record.company_id = self.company_id
                 record.last_subject = profile_data["last_subject"]
                 record.preferences = preferences
                 session.add(record)
@@ -798,11 +832,14 @@ class ContextEngine:
         try:
             record = (
                 session.query(CustomerContext)
-                .filter(CustomerContext.number == number)
+                .filter(
+                    CustomerContext.company_id == self.company_id,
+                    CustomerContext.number == number,
+                )
                 .first()
             )
             if record is None:
-                record = CustomerContext(number=number)
+                record = CustomerContext(company_id=self.company_id, number=number)
                 session.add(record)
             record.frequent_topics = topics
             record.product_mentions = products

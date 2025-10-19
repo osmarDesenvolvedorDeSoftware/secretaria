@@ -8,6 +8,7 @@ import hmac
 import pytest
 
 from app.config import settings
+from tests.conftest import DummyQueue
 
 
 @pytest.fixture(autouse=True)
@@ -24,6 +25,10 @@ def _sign(ts: int, body: bytes) -> str:
 
 
 def test_webhook_success_enqueues_job(app, client, monkeypatch):
+    app.task_queue = DummyQueue()  # type: ignore[attr-defined]
+    app.dead_letter_queue = DummyQueue()  # type: ignore[attr-defined]
+    app.get_task_queue = lambda _company_id: app.task_queue  # type: ignore[attr-defined]
+    app.get_dead_letter_queue = lambda _company_id: app.dead_letter_queue  # type: ignore[attr-defined]
     app.task_queue.enqueued.clear()  # type: ignore[attr-defined]
     payload = {
         "message": {"conversation": "olá"},
@@ -37,17 +42,24 @@ def test_webhook_success_enqueues_job(app, client, monkeypatch):
     response = client.post(
         "/webhook/whaticket",
         data=body,
-        headers={"X-Signature": signature, "X-Timestamp": str(ts)},
+        headers={
+            "X-Signature": signature,
+            "X-Timestamp": str(ts),
+            "X-Company-Domain": "teste.local",
+        },
         content_type="application/json",
     )
 
     assert response.status_code == 202
     assert len(app.task_queue.enqueued) == 1  # type: ignore[attr-defined]
     job = app.task_queue.enqueued[0]  # type: ignore[attr-defined]
-    assert job[1][0] == "5511999999999"
+    assert job[1][0] == 1
+    assert job[1][1] == "5511999999999"
 
 
 def test_webhook_invalid_signature(app, client, monkeypatch):
+    app.task_queue = DummyQueue()  # type: ignore[attr-defined]
+    app.get_task_queue = lambda _company_id: app.task_queue  # type: ignore[attr-defined]
     app.task_queue.enqueued.clear()  # type: ignore[attr-defined]
     payload = {"message": {"conversation": "olá"}, "number": "5511999999999"}
     body = json.dumps(payload).encode()
@@ -57,7 +69,11 @@ def test_webhook_invalid_signature(app, client, monkeypatch):
     response = client.post(
         "/webhook/whaticket",
         data=body,
-        headers={"X-Signature": "bad", "X-Timestamp": str(ts)},
+        headers={
+            "X-Signature": "bad",
+            "X-Timestamp": str(ts),
+            "X-Company-Domain": "teste.local",
+        },
         content_type="application/json",
     )
 
@@ -66,6 +82,8 @@ def test_webhook_invalid_signature(app, client, monkeypatch):
 
 
 def test_webhook_rate_limited(app, client, monkeypatch):
+    app.task_queue = DummyQueue()  # type: ignore[attr-defined]
+    app.get_task_queue = lambda _company_id: app.task_queue  # type: ignore[attr-defined]
     app.task_queue.enqueued.clear()  # type: ignore[attr-defined]
     monkeypatch.setattr(settings, "webhook_rate_limit_number", 0)
 
@@ -78,7 +96,11 @@ def test_webhook_rate_limited(app, client, monkeypatch):
     response = client.post(
         "/webhook/whaticket",
         data=body,
-        headers={"X-Signature": signature, "X-Timestamp": str(ts)},
+        headers={
+            "X-Signature": signature,
+            "X-Timestamp": str(ts),
+            "X-Company-Domain": "teste.local",
+        },
         content_type="application/json",
     )
 
@@ -87,6 +109,8 @@ def test_webhook_rate_limited(app, client, monkeypatch):
 
 
 def test_webhook_invalid_token(app, client, monkeypatch):
+    app.task_queue = DummyQueue()  # type: ignore[attr-defined]
+    app.get_task_queue = lambda _company_id: app.task_queue  # type: ignore[attr-defined]
     app.task_queue.enqueued.clear()  # type: ignore[attr-defined]
     monkeypatch.setattr(settings, "webhook_token_optional", "expected")
     payload = {"message": {"conversation": "olá"}, "number": "5511999999999"}
@@ -97,7 +121,12 @@ def test_webhook_invalid_token(app, client, monkeypatch):
     response = client.post(
         "/webhook/whaticket",
         data=body,
-        headers={"X-Signature": signature, "X-Timestamp": str(ts), "X-Webhook-Token": "wrong"},
+        headers={
+            "X-Signature": signature,
+            "X-Timestamp": str(ts),
+            "X-Webhook-Token": "wrong",
+            "X-Company-Domain": "teste.local",
+        },
         content_type="application/json",
     )
 
@@ -106,6 +135,8 @@ def test_webhook_invalid_token(app, client, monkeypatch):
 
 
 def test_webhook_invalid_payload_returns_400(app, client, monkeypatch):
+    app.task_queue = DummyQueue()  # type: ignore[attr-defined]
+    app.get_task_queue = lambda _company_id: app.task_queue  # type: ignore[attr-defined]
     app.task_queue.enqueued.clear()  # type: ignore[attr-defined]
     body = b"{bad json"
     ts = 1_700_000_000
@@ -115,7 +146,11 @@ def test_webhook_invalid_payload_returns_400(app, client, monkeypatch):
     response = client.post(
         "/webhook/whaticket",
         data=body,
-        headers={"X-Signature": signature, "X-Timestamp": str(ts)},
+        headers={
+            "X-Signature": signature,
+            "X-Timestamp": str(ts),
+            "X-Company-Domain": "teste.local",
+        },
         content_type="application/json",
     )
 

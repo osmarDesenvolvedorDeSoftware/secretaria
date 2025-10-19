@@ -27,6 +27,10 @@
           <p class="card-text">Informe a senha operacional definida no ambiente para visualizar o painel.</p>
           <form id="form-login" class="row g-3">
             <div class="col-md-6">
+              <label for="empresa-id" class="form-label">ID da empresa</label>
+              <input type="number" class="form-control" id="empresa-id" min="1" required>
+            </div>
+            <div class="col-md-6">
               <label for="senha-painel" class="form-label">Senha</label>
               <input type="password" class="form-control" id="senha-painel" autocomplete="current-password" required>
             </div>
@@ -95,6 +99,31 @@
         </div>
       </div>
 
+      <div id="companies-card" class="card shadow-sm mb-4 d-none">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <h5 class="card-title mb-0">Empresas e planos</h5>
+            <span class="badge bg-primary" id="companies-count">0 empresas</span>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-sm table-striped">
+              <thead>
+                <tr>
+                  <th>Empresa</th>
+                  <th>Domínio</th>
+                  <th>Plano</th>
+                  <th>Status</th>
+                  <th>Mensagens</th>
+                  <th>Tokens</th>
+                  <th>Vencimento</th>
+                </tr>
+              </thead>
+              <tbody id="companies-table"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
       <div id="preview-card" class="card shadow-sm mb-4 d-none">
         <div class="card-body">
           <div class="d-flex justify-content-between align-items-center">
@@ -109,6 +138,11 @@
     </div>
     <script>
       let authToken = localStorage.getItem('panel_token') || '';
+      let currentCompanyId = parseInt(localStorage.getItem('panel_company_id') || '0', 10) || null;
+      const companyIdInput = document.getElementById('empresa-id');
+      if (companyIdInput && currentCompanyId) {
+        companyIdInput.value = currentCompanyId;
+      }
       const toneInputs = document.querySelectorAll('#tone-group input[type="radio"]');
       const formalityRange = document.getElementById('config-formality');
       const empathyRange = document.getElementById('config-empathy');
@@ -198,18 +232,27 @@
         previewCard.classList.remove('d-none');
       }
 
-      function setAuthToken(token) {
+      function setAuthToken(token, companyId = currentCompanyId) {
         authToken = token;
         const logoutButton = document.getElementById('btn-logout');
         const configCard = document.getElementById('config-card');
         const configAlert = document.getElementById('config-alert');
         if (authToken) {
           localStorage.setItem('panel_token', authToken);
+          if (companyId) {
+            currentCompanyId = companyId;
+            localStorage.setItem('panel_company_id', String(companyId));
+            if (companyIdInput) {
+              companyIdInput.value = companyId;
+            }
+          }
           logoutButton.classList.remove('d-none');
           document.getElementById('login-card').classList.add('d-none');
           updatePreview();
         } else {
           localStorage.removeItem('panel_token');
+          localStorage.removeItem('panel_company_id');
+          currentCompanyId = null;
           logoutButton.classList.add('d-none');
           document.getElementById('login-card').classList.remove('d-none');
           configCard.classList.add('d-none');
@@ -219,6 +262,9 @@
           applyToneSelection('amigavel', { silent: true });
           updateSliderDisplays();
           updatePreview();
+          document.getElementById('companies-card').classList.add('d-none');
+          document.getElementById('companies-table').innerHTML = '';
+          document.getElementById('companies-count').textContent = '0 empresas';
         }
       }
 
@@ -336,9 +382,69 @@
         }
       }
 
+      async function carregarEmpresas() {
+        const companiesCard = document.getElementById('companies-card');
+        const companiesTable = document.getElementById('companies-table');
+        const companiesCount = document.getElementById('companies-count');
+        if (!ensureAuthentication()) {
+          companiesCard.classList.add('d-none');
+          return;
+        }
+        try {
+          const resposta = await fetch('/painel/empresas', {
+            headers: {
+              Authorization: `Bearer ${authToken}`,
+            },
+          });
+          if (resposta.status === 401) {
+            setAuthToken('');
+            throw new Error('Sessão expirada. Faça login novamente.');
+          }
+          if (!resposta.ok) {
+            throw new Error('Não foi possível carregar as empresas.');
+          }
+          const data = await resposta.json();
+          if (!Array.isArray(data) || data.length === 0) {
+            companiesTable.innerHTML = '<tr><td colspan="7" class="text-muted">Nenhuma empresa cadastrada.</td></tr>';
+            companiesCount.textContent = '0 empresas';
+            companiesCard.classList.remove('d-none');
+            return;
+          }
+          companiesTable.innerHTML = data.map((empresa) => {
+            const planName = (empresa.plan && empresa.plan.name) || 'Sem plano';
+            const subscriptionStatus = (empresa.subscription && empresa.subscription.status) || 'sem_assinatura';
+            const vencimento = empresa.subscription && empresa.subscription.vencimento
+              ? new Date(empresa.subscription.vencimento).toLocaleDateString('pt-BR')
+              : '-';
+            const usage = empresa.usage || {};
+            const messagesTotal = (usage.messages_inbound || 0) + (usage.messages_outbound || 0);
+            const tokensTotal = (usage.tokens_inbound || 0) + (usage.tokens_outbound || 0);
+            return `
+              <tr>
+                <td>${empresa.company_name}</td>
+                <td>${empresa.domain || '-'}</td>
+                <td>${planName}</td>
+                <td>${subscriptionStatus.toUpperCase()}</td>
+                <td>${messagesTotal}</td>
+                <td>${tokensTotal}</td>
+                <td>${vencimento}</td>
+              </tr>
+            `;
+          }).join('');
+          companiesCount.textContent = `${data.length} ${data.length === 1 ? 'empresa' : 'empresas'}`;
+          companiesCard.classList.remove('d-none');
+        } catch (erro) {
+          const alerta = document.getElementById('alerta');
+          alerta.textContent = erro.message;
+          alerta.classList.remove('d-none');
+          companiesCard.classList.add('d-none');
+        }
+      }
+
       document.getElementById('btn-refresh').addEventListener('click', () => {
         carregar();
         carregarConfig();
+        carregarEmpresas();
       });
       toneInputs.forEach((input) => {
         input.addEventListener('change', (event) => {
@@ -366,16 +472,20 @@
       document.getElementById('form-login').addEventListener('submit', async (event) => {
         event.preventDefault();
         const senha = document.getElementById('senha-painel').value.trim();
+        const empresaValor = companyIdInput ? Number(companyIdInput.value) : NaN;
         const alerta = document.getElementById('alerta');
         alerta.classList.add('d-none');
         alerta.textContent = '';
         try {
+          if (!Number.isFinite(empresaValor) || empresaValor <= 0) {
+            throw new Error('Informe um ID de empresa válido.');
+          }
           const resposta = await fetch('/auth/token', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ password: senha }),
+            body: JSON.stringify({ password: senha, company_id: empresaValor }),
           });
           if (!resposta.ok) {
             if (resposta.status === 401) {
@@ -387,10 +497,12 @@
           if (!data.access_token) {
             throw new Error('Resposta inesperada do servidor.');
           }
-          setAuthToken(data.access_token);
+          currentCompanyId = data.company_id || empresaValor;
+          setAuthToken(data.access_token, currentCompanyId);
           document.getElementById('senha-painel').value = '';
           await carregar();
           await carregarConfig();
+          await carregarEmpresas();
         } catch (erro) {
           alerta.textContent = erro.message;
           alerta.classList.remove('d-none');
@@ -463,9 +575,10 @@
 
       applyToneSelection(document.getElementById('config-tone').value || 'amigavel', { silent: true });
       updateSliderDisplays();
-      setAuthToken(authToken);
+      setAuthToken(authToken, currentCompanyId);
       carregar();
       carregarConfig();
+      carregarEmpresas();
     </script>
   </body>
 </html>
