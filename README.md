@@ -1,8 +1,12 @@
 # Secretaria Virtual Whaticket
 
+[![Release](https://img.shields.io/badge/version-v1.0-blue.svg)](docs/release_v1.0.md)
+
 Arquitetura pronta para produção para uma secretária virtual integrada ao Whaticket com Flask, Redis, RQ e PostgreSQL.
 
 ## Visão Geral
+
+- 📄 [Documentação de release v1.0](docs/release_v1.0.md)
 
 * **Webhook seguro** com validação HMAC (`X-Signature`) e token opcional (`X-Webhook-Token`).
 * **Persistência** de conversas e logs de entrega em PostgreSQL (SQLAlchemy + Alembic).
@@ -143,6 +147,13 @@ Veja a árvore completa no repositório para entender os módulos de rotas, serv
 
 * Logs em JSON com `correlation_id`, método, status e duração.
 * Métricas Prometheus para integrar com Grafana/Alertmanager.
+
+## Recursos Inteligentes
+
+* **Análise de Sentimento** – detecta polaridade e ajusta tom de voz automaticamente.
+* **Classificação de Intenção** – identifica propósito da mensagem (suporte, vendas, follow-up) e atualiza métricas agregadas.
+* **Empatia Adaptativa** – regula formalidade, empatia e humor conforme perfil e humor detectado.
+* **Personalização Contextual** – resgata histórico, preferências e tópicos frequentes para respostas sob medida.
 
 ## Operação em Produção
 
