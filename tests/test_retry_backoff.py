@@ -5,7 +5,9 @@ import pytest
 from app.config import settings
 from app.models import DeliveryLog
 from app.services.tasks import TaskService, process_incoming_message
+from app.services.tenancy import TenantContext, queue_name_for_company
 from app.services.whaticket import WhaticketError
+from tests.conftest import DummyQueue
 
 
 class DummyJob:
@@ -35,7 +37,14 @@ def _clear_logs(app):
 
 
 def test_enqueue_uses_progressive_retry(app, monkeypatch):
-    service = TaskService(app.redis, app.db_session, app.task_queue)  # type: ignore[attr-defined]
+    tenant = TenantContext(company_id=1, label="1")
+    primary_queue = DummyQueue()
+    dead_queue = DummyQueue()
+    app._queue_cache[queue_name_for_company(settings.queue_name, 1)] = primary_queue  # type: ignore[attr-defined]
+    app._dead_letter_queue_cache[queue_name_for_company(settings.dead_letter_queue_name, 1)] = dead_queue  # type: ignore[attr-defined]
+    app.task_queue = primary_queue  # type: ignore[attr-defined]
+    app.dead_letter_queue = dead_queue  # type: ignore[attr-defined]
+    service = TaskService(app.redis, app.db_session, tenant, primary_queue, dead_queue)  # type: ignore[attr-defined]
     monkeypatch.setattr(settings, "rq_retry_delays", (5, 15, 45, 90))
     monkeypatch.setattr(settings, "rq_retry_max_attempts", 5)
 
@@ -74,29 +83,30 @@ def test_retryable_failure_marks_status_and_metrics(app, monkeypatch):
 
     from app.metrics import whaticket_send_retry_total
 
-    baseline = whaticket_send_retry_total._value.get()
+    metric = whaticket_send_retry_total.labels(company="1")
+    baseline = metric._value.get()
 
     with app.app_context():
         _clear_logs(app)
         with pytest.raises(WhaticketError):
-            process_incoming_message("5511000000000", "Oi", "text", "c1")
+            process_incoming_message(1, "5511000000000", "Oi", "text", "c1")
         session = app.db_session()  # type: ignore[attr-defined]
         logs = session.query(DeliveryLog).all()
         assert logs[-1].status == "FAILED_TEMPORARY"
         session.close()
 
         with pytest.raises(WhaticketError):
-            process_incoming_message("5511000000000", "Oi", "text", "c1")
+            process_incoming_message(1, "5511000000000", "Oi", "text", "c1")
         session = app.db_session()  # type: ignore[attr-defined]
         logs = session.query(DeliveryLog).all()
         assert logs[-1].status == "FAILED_TEMPORARY"
         session.close()
 
         with pytest.raises(WhaticketError):
-            process_incoming_message("5511000000000", "Oi", "text", "c1")
+            process_incoming_message(1, "5511000000000", "Oi", "text", "c1")
         session = app.db_session()  # type: ignore[attr-defined]
         logs = session.query(DeliveryLog).all()
         assert logs[-1].status == "FAILED_PERMANENT"
         session.close()
 
-    assert whaticket_send_retry_total._value.get() >= baseline + 3
+    assert metric._value.get() >= baseline + 3

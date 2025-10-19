@@ -8,11 +8,24 @@
   - **v1.1** – hardening de segurança (rotações automáticas de segredos, rate limiting por cliente, testes de carga contínuos).
   - **v2.0** – expansão multicanal (e-mail/SMS), workflows dinâmicos e painel com analytics avançado em tempo real.
 
+## Release v1.1 – Em andamento
+
+- Status: ⚙️ Em validação – arquitetura SaaS multiempresa pronta com billing inicial.
+- Entregas concluídas:
+  - Multi-tenancy completo com modelo `Company`, isolamento Redis/RQ por tenant e JWT com `company_id`.
+  - Gestão de planos (`Plan`) e assinaturas (`Subscription`) com `BillingService` e webhook `/webhook/billing`.
+  - Painel administrativo atualizado com `/painel/empresas`, dashboard de consumo e métricas por empresa.
+  - Prometheus/Grafana expandidos com labels `company_id` para mensagens, tokens e filas.
+- Pendências para GA:
+  - Documentar fluxo de cobrança e atualização automática de status pós-webhook.
+  - Cobertura de testes para rotas de empresas/billing e validação do painel multiempresa.
+  - Playbooks operacionais para limites excedidos e alertas por tenant.
+
 | Componente | Status | Observações |
 | --- | --- | --- |
-| Backend Flask (rotas/serviços) | ⚠️ Parcial | Fluxo do webhook robusto, mas depende de variáveis sensíveis e políticas de retry finas ainda não validadas em carga real. |
+| Backend Flask (rotas/serviços) | ⚙️ Em validação | Webhook e painel multiempresa concluídos; pendem testes extras para billing e limites por tenant. |
 | Fila e Workers RQ | ⚠️ Parcial | Worker dedicado e métricas de fila existem, porém falta autoescala, supervisão e estratégia de reprocessamento após falhas críticas do worker. |
-| Persistência (PostgreSQL + Redis) | ⚠️ Parcial | Modelos e contexto curto prazo implementados, mas ausência de migrações automatizadas e monitoramento de crescimento do Redis são riscos. |
+| Persistência (PostgreSQL + Redis) | ⚙️ Em validação | Esquema multiempresa migrado; monitoramento de crescimento Redis por tenant precisa de runbooks. |
 | Segurança e Compliance | ⚠️ Parcial | HMAC, rate limiting e mitigação de prompt injection presentes; falta auditoria de acesso, rotação de segredos e proteção DDoS avançada. |
 | Observabilidade & Operações | ✅ Completo | Prometheus integrado, healthcheck profundo e logs estruturados com correlação operacional. |
 | Painel / Frontend interno | ⚠️ Parcial | Painel funcional mas sem autenticação, controles de acesso e testes end-to-end de UI. |
@@ -46,7 +59,8 @@
 5. ✅ **Segurança do Painel**: implementar autenticação (SSO ou JWT interno), controle de permissão e revisão de logs de acesso.
 6. ✅ **Resiliência de Integrações**: adicionar fila de DLQ e mecanismo de reprocessamento manual para mensagens não entregues; registrar métricas por cliente/campanha.
 7. **Validação de Carga**: executar testes de carga sobre o endpoint /webhook para calibrar timeouts, limites por IP/número e dimensionamento do RQ.
-8. **Monitoramento Fino**: criar dashboards Prometheus/Grafana com alertas para latência do LLM, falhas Whaticket e backlog da fila.
+8. **Alertas por Tenant**: configurar regras no Alertmanager para limites de mensagens/tokens extrapolados por `company_id` e fila saturada.
+9. **Testes de Billing e Painel**: ampliar suíte pytest para cobrir rotas `/painel/empresas`, webhook de billing e UI multiempresa.
 
 # Próximas Expansões
 
@@ -78,7 +92,10 @@ Os ajustes de empatia e a transparência via preview aumentam a confiança do op
 
 # Progresso Atual
 
-- Supervisão dos workers com `supervisord` (múltiplos processos, auto-restart e monitor loop com `rq info`) e suporte a fila de dead-letter dedicada.
+ - Multi-tenancy completo com `Company`, `Plan`, `Subscription` e migração `0005_multi_tenant` aplicados.
+ - Billing inicial com `BillingService`, webhook dedicado e quotas de mensagens/tokens rastreadas em Redis por tenant.
+ - Painel `/painel/empresas` exibindo consumo, plano vigente e gestão de status com UI atualizada.
+ - Supervisão dos workers com `supervisord` (múltiplos processos, auto-restart e monitor loop com `rq info`) e suporte a fila de dead-letter dedicada.
 - Implementação da fila `dead_letter` com registro automático e função de reprocessamento manual.
 - TTLs configuráveis para contexto e rate limiting no Redis, além de métricas de uso de memória expostas via Prometheus.
 - Script `scripts/rotate_secrets.py` para rotação dos tokens sensíveis (Whaticket, WhatsApp, LLM e painel).

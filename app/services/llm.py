@@ -9,9 +9,10 @@ import structlog
 from redis import Redis
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_random_exponential
 
-from app.metrics import llm_errors
+from app.metrics import llm_errors, llm_latency, token_usage_total
 from app.config import settings
 from app.services.security import detect_prompt_injection, sanitize_for_log
+from app.services.tenancy import TenantContext
 
 
 class LLMError(Exception):
@@ -19,11 +20,12 @@ class LLMError(Exception):
 
 
 class CircuitBreaker:
-    def __init__(self, redis_client: Redis) -> None:
+    def __init__(self, redis_client: Redis, tenant: TenantContext) -> None:
         self.redis = redis_client
+        self.tenant = tenant
 
     def _key(self) -> str:
-        return "llm:circuit"
+        return self.tenant.namespaced_key("llm", "circuit")
 
     def allow(self) -> bool:
         data = self.redis.get(self._key())
@@ -57,10 +59,12 @@ class CircuitBreaker:
 
 
 class LLMClient:
-    def __init__(self, redis_client: Redis) -> None:
+    def __init__(self, redis_client: Redis, tenant: TenantContext) -> None:
         self.redis = redis_client
-        self.logger = structlog.get_logger().bind(service="gemini")
-        self.circuit_breaker = CircuitBreaker(redis_client)
+        self.tenant = tenant
+        self.company_label = tenant.label
+        self.logger = structlog.get_logger().bind(service="gemini", company=self.company_label)
+        self.circuit_breaker = CircuitBreaker(redis_client, tenant)
 
     @retry(
         stop=stop_after_attempt(settings.llm_retry_attempts),
@@ -111,15 +115,25 @@ class LLMClient:
             if not text_output:
                 raise LLMError("Conteúdo ausente na resposta")
             self.circuit_breaker.record_success()
-            return text_output.strip()
+            clean_response = text_output.strip()
+            if clean_response:
+                token_usage_total.labels(company=self.company_label, direction="outbound").inc(
+                    max(len(clean_response.split()), 1)
+                )
+            return clean_response
         except (requests.RequestException, json.JSONDecodeError) as exc:
             self.logger.exception(
                 "llm_request_error",
                 error=sanitize_for_log(str(exc)),
             )
             self.circuit_breaker.record_failure()
-            llm_errors.inc()
+            llm_errors.labels(company=self.company_label).inc()
             raise LLMError("Falha ao chamar LLM")
         finally:
             duration = time.time() - start
-            structlog.get_logger().info("llm_call", duration=duration)
+            llm_latency.labels(company=self.company_label).observe(duration)
+            structlog.get_logger().info(
+                "llm_call",
+                duration=duration,
+                company=self.company_label,
+            )

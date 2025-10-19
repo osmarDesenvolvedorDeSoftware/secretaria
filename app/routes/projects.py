@@ -7,9 +7,10 @@ from sqlalchemy import func, select
 
 from app import get_db_session
 from app.config import settings
-from app.models.personalization_config import PersonalizationConfig
-from app.models.project import Project
+from app.models import Company, PersonalizationConfig, Plan, Project, Subscription
 from app.services.auth import encode_jwt, verify_jwt
+from app.services.billing import BillingService
+from app.services.tenancy import TenantContext, build_tenant_context
 
 bp = Blueprint("projects", __name__)
 
@@ -25,14 +26,25 @@ def _project_to_dict(project: Project) -> dict[str, object]:
     }
 
 
-def _get_panel_config(session) -> PersonalizationConfig:
+def _require_company_id() -> int:
+    company_id = getattr(request, "panel_company_id", None)
+    if company_id is None:
+        raise ValueError("company_id_missing")
+    try:
+        return int(company_id)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("invalid_company_id") from exc
+
+
+def _get_panel_config(session, company_id: int) -> PersonalizationConfig:
     config = (
         session.query(PersonalizationConfig)
+        .filter(PersonalizationConfig.company_id == company_id)
         .order_by(PersonalizationConfig.updated_at.desc().nullslast(), PersonalizationConfig.id.asc())
         .first()
     )
     if config is None:
-        config = PersonalizationConfig()
+        config = PersonalizationConfig(company_id=company_id)
         session.add(config)
         session.flush()
     return config
@@ -72,6 +84,8 @@ def require_panel_auth(func):
         if payload is None:
             return jsonify({"error": "unauthorized"}), 401
         request.panel_identity = payload  # type: ignore[attr-defined]
+        request.panel_scope = payload.get("scope", "panel:admin")  # type: ignore[attr-defined]
+        request.panel_company_id = payload.get("company_id")  # type: ignore[attr-defined]
         return func(*args, **kwargs)
 
     return wrapper
@@ -80,16 +94,24 @@ def require_panel_auth(func):
 @bp.get("/painel/config")
 @require_panel_auth
 def get_panel_config():
+    try:
+        company_id = _require_company_id()
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
     with get_db_session(current_app) as session:
-        config = _get_panel_config(session)
+        config = _get_panel_config(session, company_id)
         payload = _panel_config_payload(config)
-    return jsonify(payload)
+    return jsonify({"company_id": company_id, **payload})
 
 
 @bp.put("/painel/config")
 @require_panel_auth
 def update_panel_config():
     payload = request.get_json(silent=True) or {}
+    try:
+        company_id = _require_company_id()
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
     tone = str(payload.get("tone_of_voice") or "amigavel").strip() or "amigavel"
     message_limit_raw = payload.get("message_limit")
     try:
@@ -125,7 +147,7 @@ def update_panel_config():
     empathy_level = max(0, min(100, empathy_level))
 
     with get_db_session(current_app) as session:
-        config = _get_panel_config(session)
+        config = _get_panel_config(session, company_id)
         config.tone_of_voice = tone
         config.message_limit = message_limit
         config.opening_phrases = phrases
@@ -140,27 +162,45 @@ def update_panel_config():
     redis_client = getattr(current_app, "redis", None)
     if redis_client is not None:
         try:
-            redis_client.delete("ctx:personalization_config")  # type: ignore[arg-type]
+            tenant = TenantContext(company_id=company_id, label=str(company_id))
+            redis_client.delete(tenant.namespaced_key("ctx", "personalization_config"))  # type: ignore[arg-type]
         except Exception:
             pass
-    return jsonify(response_payload)
+    return jsonify({"company_id": company_id, **response_payload})
 
 
 @bp.post("/auth/token")
 def issue_panel_token():
     payload = request.get_json(silent=True) or {}
     password = str(payload.get("password") or "")
+    company_id = payload.get("company_id")
     if not settings.panel_password:
         return jsonify({"error": "panel_password_not_configured"}), 503
     if password != settings.panel_password:
         return jsonify({"error": "invalid_credentials"}), 401
 
-    token = encode_jwt({"sub": "panel"}, settings.panel_jwt_secret, settings.panel_token_ttl_seconds)
+    try:
+        company_id_int = int(company_id)
+    except (TypeError, ValueError):
+        return jsonify({"error": "invalid_company_id"}), 400
+
+    with get_db_session(current_app) as session:
+        company = session.get(Company, company_id_int)
+        if company is None:
+            return jsonify({"error": "company_not_found"}), 404
+
+    token_payload = {
+        "sub": "panel",
+        "scope": "panel:admin",
+        "company_id": company_id_int,
+    }
+    token = encode_jwt(token_payload, settings.panel_jwt_secret, settings.panel_token_ttl_seconds)
     response = jsonify(
         {
             "access_token": token,
             "token_type": "bearer",
             "expires_in": settings.panel_token_ttl_seconds,
+            "company_id": company_id_int,
         }
     )
     response.set_cookie(
@@ -174,12 +214,127 @@ def issue_panel_token():
     return response
 
 
+@bp.get("/painel/planos")
+@require_panel_auth
+def list_plans():
+    with get_db_session(current_app) as session:
+        plans = session.execute(select(Plan).order_by(Plan.preco.asc(), Plan.id.asc())).scalars().all()
+    return jsonify([plan.to_dict() for plan in plans])
+
+
+@bp.get("/painel/empresas")
+@require_panel_auth
+def list_companies():
+    billing = BillingService(current_app.db_session, current_app.redis)  # type: ignore[attr-defined]
+    with get_db_session(current_app) as session:
+        companies = session.execute(select(Company).order_by(Company.created_at.desc())).scalars().all()
+    summaries = [billing.summarize_company(company.id) for company in companies]
+    return jsonify(summaries)
+
+
+@bp.post("/painel/empresas")
+@require_panel_auth
+def create_company():
+    payload = request.get_json(silent=True) or {}
+    name = str(payload.get("name") or "").strip()
+    domain = str(payload.get("domain") or "").strip().lower()
+    status = str(payload.get("status") or "ativo").lower()
+    plan_id_raw = payload.get("plan_id")
+    ciclo = str(payload.get("ciclo") or "mensal").lower()
+    if not name or not domain:
+        return jsonify({"error": "name_and_domain_required"}), 400
+    if status not in {"ativo", "suspenso", "cancelado"}:
+        return jsonify({"error": "invalid_status"}), 400
+
+    with get_db_session(current_app) as session:
+        exists = session.execute(
+            select(func.count()).select_from(Company).where(func.lower(Company.domain) == domain)
+        ).scalar()
+        if exists:
+            return jsonify({"error": "domain_in_use"}), 409
+        company = Company(name=name, domain=domain, status=status)
+        session.add(company)
+        session.flush()
+        company_id = company.id
+
+    billing = BillingService(current_app.db_session, current_app.redis)  # type: ignore[attr-defined]
+    if plan_id_raw is not None:
+        try:
+            billing.assign_plan(int(company_id), int(plan_id_raw), ciclo=ciclo, status=status)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+
+    summary = billing.summarize_company(company_id)
+    return jsonify(summary), 201
+
+
+@bp.put("/painel/empresas/<int:company_id>")
+@require_panel_auth
+def update_company(company_id: int):
+    payload = request.get_json(silent=True) or {}
+    plan_id_raw = payload.get("plan_id")
+    ciclo = str(payload.get("ciclo") or "mensal").lower()
+    status_value = None
+    with get_db_session(current_app) as session:
+        company = session.get(Company, company_id)
+        if company is None:
+            return jsonify({"error": "not_found"}), 404
+        if "name" in payload:
+            company.name = str(payload["name"]).strip() or company.name
+        if "domain" in payload:
+            domain = str(payload["domain"] or "").strip().lower()
+            if not domain:
+                return jsonify({"error": "invalid_domain"}), 400
+            conflict = session.execute(
+                select(func.count())
+                .select_from(Company)
+                .where(func.lower(Company.domain) == domain, Company.id != company_id)
+            ).scalar()
+            if conflict:
+                return jsonify({"error": "domain_in_use"}), 409
+            company.domain = domain
+        if "status" in payload:
+            status = str(payload["status"] or "ativo").lower()
+            if status not in {"ativo", "suspenso", "cancelado"}:
+                return jsonify({"error": "invalid_status"}), 400
+            company.status = status
+        session.add(company)
+        session.flush()
+        status_value = company.status
+
+    billing = BillingService(current_app.db_session, current_app.redis)  # type: ignore[attr-defined]
+    if plan_id_raw is not None:
+        try:
+            billing.assign_plan(company_id, int(plan_id_raw), ciclo=ciclo, status=status_value or "ativa")
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+
+    summary = billing.summarize_company(company_id)
+    return jsonify(summary)
+
+
+@bp.get("/painel/empresas/<int:company_id>")
+@require_panel_auth
+def get_company(company_id: int):
+    billing = BillingService(current_app.db_session, current_app.redis)  # type: ignore[attr-defined]
+    summary = billing.summarize_company(company_id)
+    if summary.get("status") == "desconhecida":
+        return jsonify({"error": "not_found"}), 404
+    return jsonify(summary)
+
+
 @bp.get("/projects/")
 @require_panel_auth
 def list_projects():
+    try:
+        company_id = _require_company_id()
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
     with get_db_session(current_app) as session:
         result = session.execute(
-            select(Project).order_by(Project.created_at.desc(), Project.id.desc())
+            select(Project)
+            .where(Project.company_id == company_id)
+            .order_by(Project.created_at.desc(), Project.id.desc())
         )
         projects = result.scalars().all()
     return jsonify([_project_to_dict(project) for project in projects])
@@ -189,7 +344,12 @@ def list_projects():
 @require_panel_auth
 def create_project():
     payload = request.get_json(silent=True) or {}
+    try:
+        company_id = _require_company_id()
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
     project = Project(
+        company_id=company_id,
         name=payload.get("name"),
         client=payload.get("client"),
         description=payload.get("description"),
@@ -211,10 +371,16 @@ def create_project():
 @require_panel_auth
 def update_project(project_id: int):
     payload = request.get_json(silent=True) or {}
+    try:
+        company_id = _require_company_id()
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
     with get_db_session(current_app) as session:
         project = session.get(Project, project_id)
         if project is None:
             return jsonify({"error": "not found"}), 404
+        if project.company_id != company_id:
+            return jsonify({"error": "forbidden"}), 403
 
         for field in ("name", "client", "description", "status"):
             if field in payload:
@@ -229,10 +395,16 @@ def update_project(project_id: int):
 @bp.delete("/projects/<int:project_id>")
 @require_panel_auth
 def delete_project(project_id: int):
+    try:
+        company_id = _require_company_id()
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
     with get_db_session(current_app) as session:
         project = session.get(Project, project_id)
         if project is None:
             return jsonify({"error": "not found"}), 404
+        if project.company_id != company_id:
+            return jsonify({"error": "forbidden"}), 403
         session.delete(project)
 
     return jsonify({"ok": True})
@@ -241,9 +413,15 @@ def delete_project(project_id: int):
 @bp.get("/projects/stats")
 @require_panel_auth
 def project_stats():
+    try:
+        company_id = _require_company_id()
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
     with get_db_session(current_app) as session:
         rows = session.execute(
-            select(Project.status, func.count()).group_by(Project.status)
+            select(Project.status, func.count())
+            .where(Project.company_id == company_id)
+            .group_by(Project.status)
         ).all()
 
     counts = {status: total for status, total in rows}

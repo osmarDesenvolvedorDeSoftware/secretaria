@@ -31,6 +31,13 @@ from .metrics import (
     whaticket_errors,
     whaticket_latency,
 )
+from .services.tenancy import (
+    build_tenant_context,
+    extract_domain_from_request,
+    iter_companies,
+    queue_name_for_company,
+    resolve_company,
+)
 from .routes.health import health_bp
 from .routes.webhook import webhook_bp
 
@@ -93,11 +100,29 @@ def init_app() -> Flask:
     app.redis = redis_client  # type: ignore[attr-defined]
     app.db_session = SessionLocal  # type: ignore[attr-defined]
     app.db_engine = engine  # type: ignore[attr-defined]
-    app.task_queue = Queue(settings.queue_name, connection=redis_client)  # type: ignore[attr-defined]
-    app.dead_letter_queue = Queue(  # type: ignore[attr-defined]
-        settings.dead_letter_queue_name,
-        connection=redis_client,
-    )
+    app._queue_cache: dict[str, Queue] = {}
+    app._dead_letter_queue_cache: dict[str, Queue] = {}
+
+    def get_task_queue(company_id: int) -> Queue:
+        name = queue_name_for_company(settings.queue_name, company_id)
+        queue = app._queue_cache.get(name)
+        if queue is None:
+            queue = Queue(name, connection=redis_client)
+            app._queue_cache[name] = queue
+        return queue
+
+    def get_dead_letter_queue(company_id: int) -> Queue:
+        name = queue_name_for_company(settings.dead_letter_queue_name, company_id)
+        queue = app._dead_letter_queue_cache.get(name)
+        if queue is None:
+            queue = Queue(name, connection=redis_client)
+            app._dead_letter_queue_cache[name] = queue
+        return queue
+
+    app.get_task_queue = get_task_queue  # type: ignore[attr-defined]
+    app.get_dead_letter_queue = get_dead_letter_queue  # type: ignore[attr-defined]
+    app.task_queue = get_task_queue(0)  # type: ignore[attr-defined]
+    app.dead_letter_queue = get_dead_letter_queue(0)  # type: ignore[attr-defined]
 
     @app.teardown_appcontext
     def remove_session(exception: Exception | None) -> None:
@@ -110,6 +135,21 @@ def init_app() -> Flask:
         structlog.contextvars.bind_contextvars(correlation_id=corr_id)
         g.correlation_id = corr_id
         g.start_time = time.time()
+        domain = extract_domain_from_request(request)
+        company = None
+        if domain:
+            session = SessionLocal()
+            try:
+                company = resolve_company(session, domain)
+            finally:
+                session.close()
+        g.company = company
+        if company is not None:
+            tenant = build_tenant_context(company)
+            g.tenant = tenant
+            structlog.contextvars.bind_contextvars(company_id=company.id)
+        else:
+            g.tenant = None
 
     @app.after_request
     def add_response_headers(response):
@@ -142,25 +182,38 @@ def init_app() -> Flask:
 
     @app.route("/metrics")
     def metrics():
-        queue_obj = getattr(app, "task_queue", None)
-        queue_size = 0
-        if queue_obj is not None:
-            count_attr = getattr(queue_obj, "count", None)
-            if callable(count_attr):
-                queue_size = count_attr()
-            elif isinstance(count_attr, int):
-                queue_size = count_attr
-        queue_gauge.set(queue_size)
+        try:
+            companies = iter_companies(SessionLocal)
+        except Exception:
+            companies = []
+        seen_companies: set[str] = set()
+        for company in companies:
+            label = str(company.id)
+            seen_companies.add(label)
+            queue_obj = get_task_queue(company.id)
+            queue_size = queue_obj.count() if hasattr(queue_obj, "count") else 0
+            queue_gauge.labels(company=label).set(queue_size)
 
-        dead_letter_obj = getattr(app, "dead_letter_queue", None)
-        dead_letter_size = 0
-        if dead_letter_obj is not None:
-            dlq_count_attr = getattr(dead_letter_obj, "count", None)
-            if callable(dlq_count_attr):
-                dead_letter_size = dlq_count_attr()
-            elif isinstance(dlq_count_attr, int):
-                dead_letter_size = dlq_count_attr
-        dead_letter_queue_gauge.set(dead_letter_size)
+            dead_letter_obj = get_dead_letter_queue(company.id)
+            dead_letter_size = (
+                dead_letter_obj.count() if hasattr(dead_letter_obj, "count") else 0
+            )
+            dead_letter_queue_gauge.labels(company=label).set(dead_letter_size)
+
+        # Garantir que métricas da fila padrão (company 0) também sejam expostas
+        if "0" not in seen_companies:
+            default_queue = getattr(app, "task_queue", None)
+            default_dead_letter = getattr(app, "dead_letter_queue", None)
+            if default_queue is not None:
+                count_attr = getattr(default_queue, "count", None)
+                queue_size = count_attr() if callable(count_attr) else int(count_attr or 0)
+                queue_gauge.labels(company="0").set(queue_size)
+            if default_dead_letter is not None:
+                count_attr = getattr(default_dead_letter, "count", None)
+                dead_letter_size = (
+                    count_attr() if callable(count_attr) else int(count_attr or 0)
+                )
+                dead_letter_queue_gauge.labels(company="0").set(dead_letter_size)
 
         redis_client = getattr(app, "redis", None)
         if redis_client is not None:

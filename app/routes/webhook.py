@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from flask import Blueprint, Response, current_app, jsonify, request
+from flask import Blueprint, Response, current_app, g, jsonify, request
 from pydantic import BaseModel, ValidationError, field_validator, model_validator
 from rq import Queue
 
@@ -62,32 +62,45 @@ def whaticket_webhook() -> Response:
     raw_body = request.get_data()
 
     if not validate_hmac_signature(request):
-        webhook_received_counter.labels(status="unauthorized").inc()
+        webhook_received_counter.labels(company="unknown", status="unauthorized").inc()
         return jsonify({"error": "invalid signature"}), 401
 
     if not validate_webhook_token(request):
-        webhook_received_counter.labels(status="unauthorized").inc()
+        webhook_received_counter.labels(company="unknown", status="unauthorized").inc()
         return jsonify({"error": "invalid token"}), 401
 
     try:
         payload = IncomingWebhook.parse_raw_body(raw_body)
     except (json.JSONDecodeError, ValidationError) as exc:
-        webhook_received_counter.labels(status="bad_request").inc()
+        webhook_received_counter.labels(company="unknown", status="bad_request").inc()
         return jsonify({"error": "invalid payload", "details": str(exc)}), 400
 
-    rate_limiter = RateLimiter(current_app.redis)  # type: ignore[attr-defined]
+    tenant = getattr(g, "tenant", None)
+    company_label = tenant.label if tenant else "unknown"
+    if tenant is None:
+        webhook_received_counter.labels(company=company_label, status="company_not_found").inc()
+        return jsonify({"error": "company_not_found"}), 404
+
+    rate_limiter = RateLimiter(current_app.redis, tenant)  # type: ignore[attr-defined]
     if not rate_limiter.check_ip(request.remote_addr or "unknown"):
-        webhook_received_counter.labels(status="rate_limited_ip").inc()
+        webhook_received_counter.labels(company=company_label, status="rate_limited_ip").inc()
         return jsonify({"error": "too_many_requests_ip"}), 429
     if not rate_limiter.check_number(payload.number):
-        webhook_received_counter.labels(status="rate_limited_number").inc()
+        webhook_received_counter.labels(company=company_label, status="rate_limited_number").inc()
         return jsonify({"error": "too_many_requests_number"}), 429
 
     sanitized_number = payload.number
     sanitized_text = sanitize_text(payload.text)
 
-    queue: Queue = current_app.task_queue  # type: ignore[attr-defined]
-    service = TaskService(current_app.redis, current_app.db_session, queue)  # type: ignore[attr-defined]
+    queue: Queue = current_app.get_task_queue(tenant.company_id)  # type: ignore[attr-defined]
+    dead_letter_queue: Queue = current_app.get_dead_letter_queue(tenant.company_id)  # type: ignore[attr-defined]
+    service = TaskService(
+        current_app.redis,
+        current_app.db_session,
+        tenant,
+        queue,
+        dead_letter_queue,
+    )
 
     correlation_id = (
         request.headers.get("X-Correlation-ID")
@@ -101,5 +114,5 @@ def whaticket_webhook() -> Response:
         correlation_id = str(uuid.uuid4())
 
     service.enqueue(sanitized_number, sanitized_text, payload.kind, correlation_id)
-    webhook_received_counter.labels(status="accepted").inc()
+    webhook_received_counter.labels(company=company_label, status="accepted").inc()
     return jsonify({"queued": True}), 202

@@ -10,6 +10,7 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ra
 
 from app.config import settings
 from app.services.security import sanitize_for_log
+from app.services.tenancy import TenantContext
 
 
 class WhaticketError(Exception):
@@ -29,9 +30,11 @@ class WhaticketError(Exception):
 
 
 class WhaticketClient:
-    def __init__(self, redis_client: Redis) -> None:
+    def __init__(self, redis_client: Redis, tenant: TenantContext) -> None:
         self.redis = redis_client
-        self.logger = structlog.get_logger().bind(service="whaticket")
+        self.tenant = tenant
+        self.company_label = tenant.label
+        self.logger = structlog.get_logger().bind(service="whaticket", company=self.company_label)
 
     def _get_headers(self) -> dict[str, str]:
         token = self._get_auth_token()
@@ -42,7 +45,8 @@ class WhaticketClient:
 
     def _get_auth_token(self) -> str:
         if settings.enable_jwt_login:
-            cached = self.redis.get("whaticket:jwt")
+            cache_key = self.tenant.namespaced_key("whaticket", "jwt")
+            cached = self.redis.get(cache_key)
             if cached:
                 return cached
             data = {
@@ -65,7 +69,7 @@ class WhaticketClient:
             if not token:
                 raise WhaticketError("Token ausente na resposta de login", retryable=False)
             ttl = max(int(expires_in) - 60, 300)
-            self.redis.setex("whaticket:jwt", ttl, token)
+            self.redis.setex(cache_key, ttl, token)
             return token
         return settings.whatsapp_bearer_token
 
@@ -129,7 +133,12 @@ class WhaticketClient:
         }
         response = self._post(payload)
         message_id = self._parse_response(response)
-        self.logger.info("whaticket_text_sent", number=number, has_id=bool(message_id))
+        self.logger.info(
+            "whaticket_text_sent",
+            number=number,
+            has_id=bool(message_id),
+            company=self.company_label,
+        )
         return message_id
 
     @retry(

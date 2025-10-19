@@ -7,15 +7,19 @@ from sqlalchemy.orm import Session
 from app.models import Conversation, DeliveryLog
 
 
-def get_or_create_conversation(session: Session, number: str) -> Conversation:
+def get_or_create_conversation(session: Session, company_id: int, number: str) -> Conversation:
     conversation = (
         session.query(Conversation)
-        .filter(Conversation.number == number)
+        .filter(Conversation.company_id == company_id, Conversation.number == number)
         .order_by(Conversation.id.desc())
         .first()
     )
     if conversation is None:
-        conversation = Conversation(number=number, context_json=[])
+        conversation = Conversation(
+            company_id=company_id,
+            number=number,
+            context_json=[],
+        )
         session.add(conversation)
         session.flush()
     return conversation
@@ -32,6 +36,7 @@ def update_conversation_context(
 
 def add_delivery_log(
     session: Session,
+    company_id: int,
     number: str,
     body: str,
     status: str,
@@ -39,6 +44,7 @@ def add_delivery_log(
     error: str | None = None,
 ) -> DeliveryLog:
     log = DeliveryLog(
+        company_id=company_id,
         number=number,
         body=body,
         status=status,

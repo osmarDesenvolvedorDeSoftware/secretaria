@@ -7,6 +7,7 @@ import requests
 
 from app.config import settings
 from app.services.whaticket import WhaticketClient, WhaticketError
+from app.services.tenancy import TenantContext
 from tests.conftest import DummyRedis
 
 
@@ -31,8 +32,13 @@ def configure_settings(monkeypatch):
     monkeypatch.setattr("tenacity.nap.sleep", lambda *_args, **_kwargs: None)
 
 
+def _client(redis_client: DummyRedis | None = None) -> WhaticketClient:
+    tenant = TenantContext(company_id=1, label="1")
+    return WhaticketClient(redis_client or DummyRedis(), tenant)
+
+
 def test_timeout_is_retryable(monkeypatch):
-    client = WhaticketClient(DummyRedis())
+    client = _client()
     calls = {"count": 0}
 
     def fake_post(*args, **kwargs):
@@ -50,7 +56,7 @@ def test_timeout_is_retryable(monkeypatch):
 
 
 def test_server_error_retry(monkeypatch):
-    client = WhaticketClient(DummyRedis())
+    client = _client()
     calls = {"count": 0}
 
     def fake_post(*args, **kwargs):
@@ -68,7 +74,7 @@ def test_server_error_retry(monkeypatch):
 
 
 def test_client_error_not_retryable(monkeypatch):
-    client = WhaticketClient(DummyRedis())
+    client = _client()
 
     def fake_post(*args, **kwargs):
         return DummyResponse(status_code=400, text="bad request")
@@ -83,7 +89,7 @@ def test_client_error_not_retryable(monkeypatch):
 
 
 def test_invalid_json_returns_text(monkeypatch):
-    client = WhaticketClient(DummyRedis())
+    client = _client()
 
     def fake_post(*args, **kwargs):
         return DummyResponse(status_code=200, json_body=None, text="ok")
@@ -95,7 +101,7 @@ def test_invalid_json_returns_text(monkeypatch):
 
 
 def test_send_media_success(monkeypatch):
-    client = WhaticketClient(DummyRedis())
+    client = _client()
 
     def fake_post(url, headers, json, timeout):
         assert json["mediaUrl"] == "http://example.com/img.jpg"
@@ -115,7 +121,7 @@ def test_send_media_success(monkeypatch):
 
 def test_jwt_authentication_is_cached(monkeypatch):
     redis_client = DummyRedis()
-    client = WhaticketClient(redis_client)
+    client = _client(redis_client)
     monkeypatch.setattr(settings, "enable_jwt_login", True)
     monkeypatch.setattr(settings, "whaticket_jwt_email", "agent@test.io")
     monkeypatch.setattr(settings, "whaticket_jwt_password", "secret")

@@ -8,7 +8,7 @@ from flask.testing import FlaskClient
 
 @pytest.fixture
 def panel_headers(client: FlaskClient) -> dict[str, str]:
-    response = client.post("/auth/token", json={"password": "painel-teste"})
+    response = client.post("/auth/token", json={"password": "painel-teste", "company_id": 1})
     assert response.status_code == 200
     token = response.get_json()["access_token"]
     return {"Authorization": f"Bearer {token}"}

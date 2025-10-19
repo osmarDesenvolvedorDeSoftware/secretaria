@@ -35,7 +35,7 @@ def test_logs_are_sanitized(app, monkeypatch, caplog):
 
         with caplog.at_level("ERROR"):
             with pytest.raises(WhaticketError):
-                process_incoming_message("5511999999999", "Olá", "text", "corr")
+                process_incoming_message(1, "5511999999999", "Olá", "text", "corr")
 
         log_output = " ".join(record.getMessage() for record in caplog.records)
         assert "secret-token" not in log_output

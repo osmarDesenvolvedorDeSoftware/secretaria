@@ -10,10 +10,10 @@ from rq.job import Job
 
 from app.metrics import (
     fallback_transfers_total,
-    llm_errors,
-    llm_latency,
     llm_prompt_injection_blocked_total,
+    message_usage_total,
     task_latency_histogram,
+    token_usage_total,
     whaticket_errors,
     whaticket_latency,
     whaticket_send_retry_total,
@@ -28,25 +28,37 @@ from app.services.persistence import (
     update_conversation_context,
 )
 from app.services.security import detect_prompt_injection, sanitize_for_log, sanitize_text
+from app.services.tenancy import TenantContext, queue_name_for_company
 from app.services.whaticket import WhaticketClient, WhaticketError
 class TaskService:
     def __init__(
         self,
         redis_client: Redis,
         session_factory,
+        tenant: TenantContext,
         queue: Queue,
         dead_letter_queue: Queue | None = None,
     ) -> None:
         self.redis = redis_client
         self.session_factory = session_factory
+        self.tenant = tenant
+        self.company_id = tenant.company_id
+        self.company_label = tenant.label
         self.queue = queue
-        self.llm_client = LLMClient(redis_client)
-        self.whaticket_client = WhaticketClient(redis_client)
-        self.context_engine = ContextEngine(redis_client, session_factory)
+        self.llm_client = LLMClient(redis_client, tenant)
+        self.whaticket_client = WhaticketClient(redis_client, tenant)
+        self.context_engine = ContextEngine(redis_client, session_factory, tenant)
         self.dead_letter_queue = dead_letter_queue or Queue(
-            settings.dead_letter_queue_name,
+            queue_name_for_company(settings.dead_letter_queue_name, tenant.company_id),
             connection=redis_client,
         )
+        self.usage_key = tenant.namespaced_key("usage")
+
+    def _increment_usage(self, field: str, amount: int) -> None:
+        try:
+            self.redis.hincrby(self.usage_key, field, amount)
+        except Exception:
+            pass
 
     def get_context(self, number: str) -> list[dict[str, str]]:
         return self.context_engine.get_history(number)
@@ -68,12 +80,14 @@ class TaskService:
             enqueue_kwargs["retry"] = retry
         self.queue.enqueue(
             process_incoming_message,
+            self.company_id,
             number,
             body,
             kind,
             correlation_id,
             job_timeout=settings.llm_timeout_seconds + settings.request_timeout_seconds,
             meta={
+                "company_id": self.company_id,
                 "number": number,
                 "body": body,
                 "kind": kind,
@@ -84,7 +98,7 @@ class TaskService:
 
     def send_to_dead_letter(
         self,
-        payload: dict[str, str],
+        payload: dict[str, object],
         failure_reason: str | None = None,
         original_job_id: str | None = None,
         attempt: int | None = None,
@@ -105,11 +119,18 @@ class TaskService:
         return getattr(job, "id", str(uuid.uuid4()))
 
 
-def process_incoming_message(number: str, body: str, kind: str, correlation_id: str) -> None:
+def process_incoming_message(
+    company_id: int,
+    number: str,
+    body: str,
+    kind: str,
+    correlation_id: str,
+) -> None:
     from flask import current_app
 
     logger = structlog.get_logger().bind(
         task="process_incoming_message",
+        company_id=company_id,
         number=number,
         kind=kind,
     )
@@ -117,9 +138,10 @@ def process_incoming_message(number: str, body: str, kind: str, correlation_id: 
 
     redis_client: Redis = current_app.redis  # type: ignore[attr-defined]
     session_factory = current_app.db_session  # type: ignore[attr-defined]
-    queue = current_app.task_queue  # type: ignore[attr-defined]
-    dead_letter_queue = getattr(current_app, "dead_letter_queue", None)
-    service = TaskService(redis_client, session_factory, queue, dead_letter_queue)
+    tenant = TenantContext(company_id=company_id, label=str(company_id))
+    queue = current_app.get_task_queue(company_id)  # type: ignore[attr-defined]
+    dead_letter_queue = current_app.get_dead_letter_queue(company_id)  # type: ignore[attr-defined]
+    service = TaskService(redis_client, session_factory, tenant, queue, dead_letter_queue)
 
     job = get_current_job()
     attempt = 1
@@ -149,6 +171,18 @@ def process_incoming_message(number: str, body: str, kind: str, correlation_id: 
         error_detail = None
         try:
             sanitized = sanitize_text(body)
+            message_usage_total.labels(
+                company=service.company_label,
+                kind=kind or "unknown",
+            ).inc()
+            service._increment_usage("messages_inbound", 1)
+            if sanitized:
+                inbound_tokens = max(len(sanitized.split()), 1)
+                token_usage_total.labels(
+                    company=service.company_label,
+                    direction="inbound",
+                ).inc(inbound_tokens)
+                service._increment_usage("tokens_inbound", inbound_tokens)
             runtime_context = service.context_engine.prepare_runtime_context(number, sanitized)
             history_messages = list(runtime_context.history)
             context_messages_for_db = list(history_messages)
@@ -169,56 +203,70 @@ def process_incoming_message(number: str, body: str, kind: str, correlation_id: 
 
             if detect_prompt_injection(sanitized):
                 logger.warning("prompt_injection_detected")
-                llm_prompt_injection_blocked_total.inc()
+                llm_prompt_injection_blocked_total.labels(
+                    company=service.company_label
+                ).inc()
                 template_vars["resposta"] = ""
                 final_message = service.context_engine.render_template("fallback", template_vars)
-                fallback_transfers_total.inc()
+                fallback_transfers_total.labels(company=service.company_label).inc()
             elif not runtime_context.ai_enabled:
                 template_vars["resposta"] = ""
                 final_message = service.context_engine.render_template("ai_disabled", template_vars)
-                fallback_transfers_total.inc()
+                fallback_transfers_total.labels(company=service.company_label).inc()
             else:
-                llm_start = time.time()
                 response_text = ""
                 try:
                     response_text = service.llm_client.generate_reply(
                         sanitized,
                         llm_context,
                     )
-                    llm_latency.observe(time.time() - llm_start)
                 except Exception as exc:  # pragma: no cover - ensures metrics capture
                     logger.exception("llm_failure", error=sanitize_for_log(str(exc)))
-                    llm_errors.inc()
-                    llm_latency.observe(time.time() - llm_start)
                     template_vars["resposta"] = ""
                     final_message = service.context_engine.render_template("technical_issue", template_vars)
-                    fallback_transfers_total.inc()
+                    fallback_transfers_total.labels(company=service.company_label).inc()
                 else:
                     template_vars["resposta"] = response_text
                     if response_text and response_text.strip():
                         final_message = service.context_engine.render_template(selected_template, template_vars)
                     else:
                         final_message = service.context_engine.render_template("fallback", template_vars)
-                        fallback_transfers_total.inc()
+                        fallback_transfers_total.labels(company=service.company_label).inc()
 
             context_messages_for_db.append({"role": "user", "body": user_message})
             context_messages_for_db.append({"role": "assistant", "body": final_message})
+            if final_message:
+                message_usage_total.labels(
+                    company=service.company_label,
+                    kind="assistant",
+                ).inc()
+                service._increment_usage("messages_outbound", 1)
+                outbound_tokens = max(len(final_message.split()), 1)
+                token_usage_total.labels(
+                    company=service.company_label,
+                    direction="outbound",
+                ).inc(outbound_tokens)
+                service._increment_usage("tokens_outbound", outbound_tokens)
 
             whaticket_start = time.time()
             external_id = None
             try:
                 external_id = service.whaticket_client.send_text(number, final_message)
-                whaticket_latency.observe(time.time() - whaticket_start)
+                whaticket_latency.labels(company=service.company_label).observe(
+                    time.time() - whaticket_start
+                )
                 success = True
                 delivery_status = "SENT"
-                whaticket_send_success_total.inc()
+                whaticket_send_success_total.labels(company=service.company_label).inc()
             except WhaticketError as exc:
                 error_detail = sanitize_for_log(str(exc))
                 logger.exception("whaticket_failure", error=error_detail)
-                whaticket_errors.inc()
-                whaticket_latency.observe(time.time() - whaticket_start)
+                whaticket_errors.labels(company=service.company_label).inc()
+                whaticket_latency.labels(company=service.company_label).observe(
+                    time.time() - whaticket_start
+                )
                 if exc.retryable:
-                    whaticket_send_retry_total.inc()
+                    whaticket_send_retry_total.labels(company=service.company_label).inc()
                     if job is not None and job.retries_left == 0:
                         delivery_status = "FAILED_PERMANENT"
                     elif attempt >= max_attempts:
@@ -231,15 +279,21 @@ def process_incoming_message(number: str, body: str, kind: str, correlation_id: 
             except Exception as exc:
                 error_detail = sanitize_for_log(str(exc))
                 logger.exception("whaticket_failure_unexpected", error=error_detail)
-                whaticket_errors.inc()
-                whaticket_latency.observe(time.time() - whaticket_start)
+                whaticket_errors.labels(company=service.company_label).inc()
+                whaticket_latency.labels(company=service.company_label).observe(
+                    time.time() - whaticket_start
+                )
                 delivery_status = "FAILED_PERMANENT"
                 raise
             finally:
                 session = session_factory()  # type: ignore[operator]
                 try:
                     if success:
-                        conversation = get_or_create_conversation(session, number)
+                        conversation = get_or_create_conversation(
+                            session,
+                            service.company_id,
+                            number,
+                        )
                         updated_history = list(context_messages_for_db)
                         personalization = runtime_context.personalization if runtime_context else {}
                         if runtime_context is not None:
@@ -268,11 +322,19 @@ def process_incoming_message(number: str, body: str, kind: str, correlation_id: 
                             "conversation_context_persisted",
                             history_size=len(updated_history),
                         )
-                        add_delivery_log(session, number, final_message, "SENT", external_id)
+                        add_delivery_log(
+                            session,
+                            service.company_id,
+                            number,
+                            final_message,
+                            "SENT",
+                            external_id,
+                        )
                         session.commit()
                     else:
                         add_delivery_log(
                             session,
+                            service.company_id,
                             number,
                             final_message,
                             delivery_status,
@@ -289,6 +351,7 @@ def process_incoming_message(number: str, body: str, kind: str, correlation_id: 
             if not success and delivery_status == "FAILED_PERMANENT":
                 if job is None or not job.meta.get("sent_to_dead_letter"):
                     payload = {
+                        "company_id": service.company_id,
                         "number": number,
                         "body": body,
                         "kind": kind,
@@ -305,11 +368,20 @@ def process_incoming_message(number: str, body: str, kind: str, correlation_id: 
                         job.meta["sent_to_dead_letter"] = True
                         job.save_meta()
         finally:
-            task_latency_histogram.observe(time.time() - start_time)
+            task_latency_histogram.labels(company=service.company_label).observe(
+                time.time() - start_time
+            )
 
 
-def store_dead_letter_message(payload: dict[str, str], failure_reason: str | None = None) -> dict[str, str]:
-    logger = structlog.get_logger().bind(task="store_dead_letter", **payload)
+def store_dead_letter_message(
+    payload: dict[str, object], failure_reason: str | None = None
+) -> dict[str, object]:
+    company_id = payload.get("company_id")
+    logger = structlog.get_logger().bind(
+        task="store_dead_letter",
+        company_id=company_id,
+        **{k: v for k, v in payload.items() if k != "company_id"},
+    )
     logger.warning("dead_letter_recorded", failure_reason=failure_reason)
     return payload
 
@@ -322,16 +394,21 @@ def requeue_dead_letter_job(redis_client: Redis, job_id: str) -> bool:
     except Exception:
         return False
 
-    if job.origin != settings.dead_letter_queue_name:
-        return False
-
-    payload: dict[str, str] | None = job.meta.get("payload") if job.meta else None
+    payload: dict[str, object] | None = job.meta.get("payload") if job.meta else None
     if not payload and job.args:
         candidate = job.args[0]
         if isinstance(candidate, dict):
             payload = candidate
 
     if not payload:
+        return False
+
+    company_id = payload.get("company_id")
+    if not company_id:
+        return False
+
+    expected_origin = queue_name_for_company(settings.dead_letter_queue_name, int(company_id))
+    if job.origin != expected_origin:
         return False
 
     number = payload.get("number")
@@ -342,15 +419,20 @@ def requeue_dead_letter_job(redis_client: Redis, job_id: str) -> bool:
     if not number or body is None:
         return False
 
-    queue = Queue(settings.queue_name, connection=redis_client)
+    queue = Queue(
+        queue_name_for_company(settings.queue_name, int(company_id)),
+        connection=redis_client,
+    )
     queue.enqueue(
         process_incoming_message,
+        int(company_id),
         number,
         body,
         kind,
         correlation_id,
         job_timeout=settings.llm_timeout_seconds + settings.request_timeout_seconds,
         meta={
+            "company_id": int(company_id),
             "number": number,
             "body": body,
             "kind": kind,

@@ -7,7 +7,7 @@ from app.services.auth import encode_jwt
 
 
 def test_panel_login_success_sets_cookie(client: FlaskClient) -> None:
-    response = client.post("/auth/token", json={"password": "painel-teste"})
+    response = client.post("/auth/token", json={"password": "painel-teste", "company_id": 1})
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["access_token"]
@@ -27,7 +27,7 @@ def test_panel_login_success_sets_cookie(client: FlaskClient) -> None:
 
 
 def test_panel_logout_revokes_cookie_access(client: FlaskClient) -> None:
-    login = client.post("/auth/token", json={"password": "painel-teste"})
+    login = client.post("/auth/token", json={"password": "painel-teste", "company_id": 1})
     assert login.status_code == 200
     assert client.get("/projects/").status_code == 200
 
@@ -38,7 +38,11 @@ def test_panel_logout_revokes_cookie_access(client: FlaskClient) -> None:
 
 
 def test_panel_expired_token_returns_unauthorized(client: FlaskClient) -> None:
-    expired_token = encode_jwt({"sub": "panel"}, config_settings.panel_jwt_secret, expires_in=-30)
+    expired_token = encode_jwt(
+        {"sub": "panel", "scope": "panel:admin", "company_id": 1},
+        config_settings.panel_jwt_secret,
+        expires_in=-30,
+    )
     response = client.get(
         "/projects/",
         headers={"Authorization": f"Bearer {expired_token}"},

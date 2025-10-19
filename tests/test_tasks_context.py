@@ -3,7 +3,11 @@ from __future__ import annotations
 import json
 
 from app.config import settings
+import json
+
+from app.config import settings
 from app.services.tasks import TaskService
+from app.services.tenancy import TenantContext, namespaced_key
 from tests.conftest import DummyQueue, DummyRedis
 
 
@@ -44,12 +48,18 @@ class DummySessionFactory:
         return None
 
 
+def _build_service(redis_client: DummyRedis, queue: DummyQueue | None = None) -> TaskService:
+    tenant = TenantContext(company_id=1, label="1")
+    queue = queue or DummyQueue()
+    return TaskService(redis_client, DummySessionFactory(), tenant, queue)
+
+
 def test_get_context_returns_saved_messages(monkeypatch):
     redis_client = DummyRedis()
-    service = TaskService(redis_client, DummySessionFactory(), DummyQueue())
+    service = _build_service(redis_client)
 
     redis_client.set(
-        "ctx:5511000000000",
+        namespaced_key(1, "ctx", "5511000000000"),
         json.dumps([
             {"role": "user", "body": "Oi"},
         ]),
@@ -60,25 +70,25 @@ def test_get_context_returns_saved_messages(monkeypatch):
 
 def test_get_context_handles_invalid_json():
     redis_client = DummyRedis()
-    service = TaskService(redis_client, DummySessionFactory(), DummyQueue())
+    service = _build_service(redis_client)
 
-    redis_client.set("ctx:5511999999999", "{invalid")
+    redis_client.set(namespaced_key(1, "ctx", "5511999999999"), "{invalid")
 
     assert service.get_context("5511999999999") == []
 
 
 def test_get_context_handles_non_list_payload():
     redis_client = DummyRedis()
-    service = TaskService(redis_client, DummySessionFactory(), DummyQueue())
+    service = _build_service(redis_client)
 
-    redis_client.set("ctx:5511888877776", json.dumps({"not": "a list"}))
+    redis_client.set(namespaced_key(1, "ctx", "5511888877776"), json.dumps({"not": "a list"}))
 
     assert service.get_context("5511888877776") == []
 
 
 def test_set_context_truncates_and_sets_ttl(monkeypatch):
     redis_client = DummyRedis()
-    service = TaskService(redis_client, DummySessionFactory(), DummyQueue())
+    service = _build_service(redis_client)
 
     monkeypatch.setattr(settings, "context_max_messages", 3)
     monkeypatch.setattr(settings, "context_ttl", 120)
@@ -88,16 +98,16 @@ def test_set_context_truncates_and_sets_ttl(monkeypatch):
 
     service.set_context("551177665544", messages)
 
-    stored = json.loads(redis_client.get("ctx:551177665544"))
+    stored = json.loads(redis_client.get(namespaced_key(1, "ctx", "551177665544")))
     assert len(stored) == 3
     assert stored[0]["body"] == "msg-3"
-    assert redis_client.expiry["ctx:551177665544"] == 120
+    assert redis_client.expiry[namespaced_key(1, "ctx", "551177665544")] == 120
 
 
 def test_enqueue_without_retry_does_not_add_retry(monkeypatch):
     redis_client = DummyRedis()
     queue = DummyQueue()
-    service = TaskService(redis_client, DummySessionFactory(), queue)
+    service = _build_service(redis_client, queue)
 
     monkeypatch.setattr(settings, "rq_retry_delays", ())
     monkeypatch.setattr(settings, "rq_retry_max_attempts", 0)
