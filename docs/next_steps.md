@@ -10,6 +10,15 @@
 | Painel / Frontend interno | ⚠️ Parcial | Painel funcional mas sem autenticação, controles de acesso e testes end-to-end de UI. |
 | Integrações Externas (LLM & Whaticket) | ⚠️ Parcial | Retries, circuit breaker e classificação de erros implementados; dependência de tokens fixos e falta de fallback multicanal. |
 
+## Produção Controlada
+
+| Item | Status | Observações |
+| --- | --- | --- |
+| Orquestração de containers (Flask 8080, Redis, PostgreSQL, RQ, Prometheus, Alertmanager, Grafana) | ✅ Pronto | `docker-compose.prod.yml` provisiona todos os serviços com rede interna e apenas Flask/Prometheus expostos. |
+| Monitoramento e alertas | ✅ Pronto | Prometheus consome `/metrics`, aplica regras de DLQ, Redis e workers e envia ao Alertmanager com webhook configurável. |
+| Logs persistentes | ✅ Pronto | `logging.conf` usa rotação diária com retenção de 7 dias em volume dedicado. |
+| Notificação de deploy via webhook | ⚠️ Pendente | `scripts/deploy.sh` prepara payload JSON, resta definir `MONITORING_WEBHOOK_URL` do canal definitivo. |
+
 # Riscos Técnicos e Pontos de Atenção
 
 - Dependência de um único worker RQ: queda ou travamento interrompe atendimento e não há mecanismo de failover imediato.

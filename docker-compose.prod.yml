@@ -1,0 +1,122 @@
+version: "3.9"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: runtime
+    image: secretaria-app:latest
+    env_file:
+      - .env
+    environment:
+      FLASK_ENV: production
+    ports:
+      - "8080:8080"
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - app_logs:/var/log/secretaria
+    networks:
+      - public
+      - internal
+    restart: unless-stopped
+
+  worker:
+    image: secretaria-app:latest
+    command: ["rq", "worker", "--config", "docker/rq.ini"]
+    env_file:
+      - .env
+    depends_on:
+      - redis
+    volumes:
+      - app_logs:/var/log/secretaria
+    networks:
+      - internal
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    networks:
+      - internal
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - internal
+    restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    environment:
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-http://monitoring-webhook:9000/alerts}
+    volumes:
+      - ./docker/alertmanager/config.yml:/etc/alertmanager/config.yml:ro
+    command:
+      - "--config.file=/etc/alertmanager/config.yml"
+    expose:
+      - "9093"
+    networks:
+      - internal
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./docker/prometheus/alert.rules.yml:/etc/prometheus/alert.rules.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+    depends_on:
+      - app
+      - worker
+      - alertmanager
+    ports:
+      - "9090:9090"
+    networks:
+      - public
+      - internal
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.4.2
+    depends_on:
+      - prometheus
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docker/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    expose:
+      - "3000"
+    networks:
+      - internal
+    restart: unless-stopped
+
+volumes:
+  app_logs:
+  postgres_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  public:
+    driver: bridge
+  internal:
+    driver: bridge
+    internal: true
