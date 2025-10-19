@@ -76,6 +76,24 @@ fallback_transfers_total = Counter(
     "Total de transferências humanas acionadas pelo fallback",
 )
 
+sentiment_average_gauge = Gauge(
+    f"{settings.metrics_namespace}_sentiment_average",
+    "Humor médio detectado por número",
+    ["number"],
+)
+
+satisfaction_ratio_gauge = Gauge(
+    f"{settings.metrics_namespace}_satisfaction_ratio",
+    "Taxa de satisfação baseada em feedbacks positivos e negativos",
+    ["number"],
+)
+
+intention_distribution_total = Counter(
+    f"{settings.metrics_namespace}_intention_detected_total",
+    "Distribuição de intenções detectadas nas mensagens",
+    ["intention"],
+)
+
 context_learning_updates_total = Counter(
     f"{settings.metrics_namespace}_context_learning_updates_total",
     "Total de atualizações de embeddings por cliente",
@@ -109,6 +127,9 @@ __all__ = [
     "llm_errors",
     "llm_prompt_injection_blocked_total",
     "fallback_transfers_total",
+    "sentiment_average_gauge",
+    "satisfaction_ratio_gauge",
+    "intention_distribution_total",
     "context_learning_updates_total",
     "context_volume_gauge",
     "healthcheck_failures_total",

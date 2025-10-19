@@ -58,6 +58,16 @@
 | Worker de aprendizado contínuo | ⚙️ Em construção | `workers/context_trainer.py` reprocessa históricos, atualiza embeddings e publica métricas por número. |
 | Painel de ajuste da IA | ✅ Concluído | `/painel/config` expõe tom de voz, limite de mensagens, frases iniciais e toggle de IA com persistência. |
 
+## Interação Natural e UX
+
+| Módulo | Status | Observações |
+| --- | --- | --- |
+| Empatia adaptativa e humor | ✅ Concluído | Analisador de sentimento aplica empatia em casos negativos e entusiasmo moderado em positivos, com humor leve sob controle de configuração. |
+| Pré-visualização de resposta | ✅ Concluído | Painel exibe preview ao vivo que reflete tom, formalidade, empatia e humor definidos nas preferências. |
+| Telemetria de humor e satisfação | ⚙️ Em observação | Novos gauges Prometheus para humor médio, satisfação e contagem de intenções alimentam dashboards Grafana de UX. |
+
+Os ajustes de empatia e a transparência via preview aumentam a confiança do operador antes de publicar alterações, enquanto as métricas de humor e satisfação permitem calibrar rapidamente o tom da assistente. A expectativa é elevar o engajamento em jornadas longas e reduzir churn de clientes sensíveis ao atendimento, graças à capacidade de detectar frustração cedo e ajustar o acompanhamento em tempo real.
+
 # Progresso Atual
 
 - Supervisão dos workers com `supervisord` (múltiplos processos, auto-restart e monitor loop com `rq info`) e suporte a fila de dead-letter dedicada.

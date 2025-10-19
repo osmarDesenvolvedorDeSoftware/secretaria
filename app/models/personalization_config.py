@@ -16,6 +16,9 @@ class PersonalizationConfig(Base):
     message_limit = Column(Integer, nullable=False, default=5)
     opening_phrases = Column(JSON, nullable=False, default=list)
     ai_enabled = Column(Boolean, nullable=False, default=True)
+    formality_level = Column(Integer, nullable=False, default=50)
+    empathy_level = Column(Integer, nullable=False, default=70)
+    adaptive_humor = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -26,6 +29,9 @@ class PersonalizationConfig(Base):
             "message_limit": self.message_limit,
             "opening_phrases": self.opening_phrases or [],
             "ai_enabled": bool(self.ai_enabled),
+            "formality_level": int(self.formality_level or 50),
+            "empathy_level": int(self.empathy_level or 70),
+            "adaptive_humor": bool(self.adaptive_humor),
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
