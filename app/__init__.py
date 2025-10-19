@@ -19,6 +19,7 @@ from .metrics import (
     llm_errors,
     llm_latency,
     queue_gauge,
+    redis_memory_usage_gauge,
     task_latency_histogram,
     webhook_received_counter,
     whaticket_errors,
@@ -67,6 +68,10 @@ def init_app() -> Flask:
     app.db_session = SessionLocal  # type: ignore[attr-defined]
     app.db_engine = engine  # type: ignore[attr-defined]
     app.task_queue = Queue(settings.queue_name, connection=redis_client)  # type: ignore[attr-defined]
+    app.dead_letter_queue = Queue(  # type: ignore[attr-defined]
+        settings.dead_letter_queue_name,
+        connection=redis_client,
+    )
 
     @app.teardown_appcontext
     def remove_session(exception: Exception | None) -> None:
@@ -104,6 +109,25 @@ def init_app() -> Flask:
             elif isinstance(count_attr, int):
                 queue_size = count_attr
         queue_gauge.set(queue_size)
+
+        redis_client = getattr(app, "redis", None)
+        if redis_client is not None:
+            try:
+                info = redis_client.info("memory")  # type: ignore[union-attr]
+            except Exception:
+                info = {}
+            used_memory = info.get("used_memory")
+            if isinstance(used_memory, (int, float)):
+                redis_memory_usage_gauge.labels("used").set(float(used_memory))
+            max_memory = info.get("maxmemory")
+            if isinstance(max_memory, (int, float)) and max_memory > 0:
+                redis_memory_usage_gauge.labels("max_configured").set(float(max_memory))
+            redis_memory_usage_gauge.labels("warning_threshold").set(
+                float(settings.redis_memory_warning_bytes)
+            )
+            redis_memory_usage_gauge.labels("critical_threshold").set(
+                float(settings.redis_memory_critical_bytes)
+            )
         return app.response_class(generate_latest(), mimetype=CONTENT_TYPE_LATEST)
 
     from app.routes.projects import bp as projects_bp

@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 
 import structlog
 from redis import Redis
 from rq import Queue, Retry, get_current_job
+from rq.job import Job
 
 from app.metrics import (
     llm_errors,
@@ -32,12 +34,22 @@ CONTEXT_REDIS_KEY = "ctx:{number}"
 
 
 class TaskService:
-    def __init__(self, redis_client: Redis, session_factory, queue: Queue) -> None:
+    def __init__(
+        self,
+        redis_client: Redis,
+        session_factory,
+        queue: Queue,
+        dead_letter_queue: Queue | None = None,
+    ) -> None:
         self.redis = redis_client
         self.session_factory = session_factory
         self.queue = queue
         self.llm_client = LLMClient(redis_client)
         self.whaticket_client = WhaticketClient(redis_client)
+        self.dead_letter_queue = dead_letter_queue or Queue(
+            settings.dead_letter_queue_name,
+            connection=redis_client,
+        )
 
     def enqueue(self, number: str, body: str, kind: str, correlation_id: str) -> None:
         delays = list(settings.rq_retry_delays)
@@ -58,6 +70,12 @@ class TaskService:
             kind,
             correlation_id,
             job_timeout=settings.llm_timeout_seconds + settings.request_timeout_seconds,
+            meta={
+                "number": number,
+                "body": body,
+                "kind": kind,
+                "correlation_id": correlation_id,
+            },
             **enqueue_kwargs,
         )
 
@@ -77,7 +95,29 @@ class TaskService:
     def set_context(self, number: str, messages: list[dict[str, str]]) -> None:
         key = CONTEXT_REDIS_KEY.format(number=number)
         truncated = messages[-settings.context_max_messages :]
-        self.redis.setex(key, settings.context_ttl_seconds, json.dumps(truncated))
+        self.redis.setex(key, settings.context_ttl, json.dumps(truncated))
+
+    def send_to_dead_letter(
+        self,
+        payload: dict[str, str],
+        failure_reason: str | None = None,
+        original_job_id: str | None = None,
+        attempt: int | None = None,
+    ) -> str:
+        job = self.dead_letter_queue.enqueue(
+            store_dead_letter_message,
+            payload,
+            failure_reason,
+            meta={
+                "payload": payload,
+                "failure_reason": failure_reason,
+                "original_job_id": original_job_id,
+                "attempt": attempt,
+            },
+            job_timeout=settings.dead_letter_job_timeout,
+            result_ttl=settings.dead_letter_result_ttl,
+        )
+        return getattr(job, "id", str(uuid.uuid4()))
 
 
 def process_incoming_message(number: str, body: str, kind: str, correlation_id: str) -> None:
@@ -93,18 +133,31 @@ def process_incoming_message(number: str, body: str, kind: str, correlation_id: 
     redis_client: Redis = current_app.redis  # type: ignore[attr-defined]
     session_factory = current_app.db_session  # type: ignore[attr-defined]
     queue = current_app.task_queue  # type: ignore[attr-defined]
-    service = TaskService(redis_client, session_factory, queue)
+    dead_letter_queue = getattr(current_app, "dead_letter_queue", None)
+    service = TaskService(redis_client, session_factory, queue, dead_letter_queue)
 
     job = get_current_job()
     attempt = 1
     if job is not None:
         attempt = int(job.meta.get("attempt", 0)) + 1
         job.meta["attempt"] = attempt
+        job.meta.setdefault(
+            "payload",
+            {
+                "number": number,
+                "body": body,
+                "kind": kind,
+                "correlation_id": correlation_id,
+            },
+        )
         job.save_meta()
         logger = logger.bind(job_id=job.id, attempt=attempt, retries_left=job.retries_left)
     max_attempts = max(len(settings.rq_retry_delays) + 1, settings.rq_retry_max_attempts + 1)
 
     with structlog.contextvars.bound_contextvars(correlation_id=correlation_id):
+        success = False
+        delivery_status = "FAILED_TEMPORARY"
+        error_detail = None
         try:
             sanitized = sanitize_text(body)
             if detect_prompt_injection(sanitized):
@@ -132,9 +185,6 @@ def process_incoming_message(number: str, body: str, kind: str, correlation_id: 
 
             whaticket_start = time.time()
             external_id = None
-            success = False
-            error_detail = None
-            delivery_status = "FAILED_TEMPORARY"
             try:
                 external_id = service.whaticket_client.send_text(number, final_message)
                 whaticket_latency.observe(time.time() - whaticket_start)
@@ -191,5 +241,77 @@ def process_incoming_message(number: str, body: str, kind: str, correlation_id: 
                 finally:
                     session.close()
                     session_factory.remove()
+            if not success and delivery_status == "FAILED_PERMANENT":
+                if job is None or not job.meta.get("sent_to_dead_letter"):
+                    payload = {
+                        "number": number,
+                        "body": body,
+                        "kind": kind,
+                        "correlation_id": correlation_id,
+                    }
+                    dead_letter_id = service.send_to_dead_letter(
+                        payload,
+                        error_detail,
+                        getattr(job, "id", None) if job is not None else None,
+                        attempt,
+                    )
+                    logger.warning("dead_letter_enqueued", dead_letter_job_id=dead_letter_id)
+                    if job is not None:
+                        job.meta["sent_to_dead_letter"] = True
+                        job.save_meta()
         finally:
             task_latency_histogram.observe(time.time() - start_time)
+
+
+def store_dead_letter_message(payload: dict[str, str], failure_reason: str | None = None) -> dict[str, str]:
+    logger = structlog.get_logger().bind(task="store_dead_letter", **payload)
+    logger.warning("dead_letter_recorded", failure_reason=failure_reason)
+    return payload
+
+
+def requeue_dead_letter_job(redis_client: Redis, job_id: str) -> bool:
+    """Reenvia manualmente um job da fila de dead-letter para a fila principal."""
+
+    try:
+        job = Job.fetch(job_id, connection=redis_client)
+    except Exception:
+        return False
+
+    if job.origin != settings.dead_letter_queue_name:
+        return False
+
+    payload: dict[str, str] | None = job.meta.get("payload") if job.meta else None
+    if not payload and job.args:
+        candidate = job.args[0]
+        if isinstance(candidate, dict):
+            payload = candidate
+
+    if not payload:
+        return False
+
+    number = payload.get("number")
+    body = payload.get("body")
+    kind = payload.get("kind", "text")
+    correlation_id = payload.get("correlation_id", str(uuid.uuid4()))
+
+    if not number or body is None:
+        return False
+
+    queue = Queue(settings.queue_name, connection=redis_client)
+    queue.enqueue(
+        process_incoming_message,
+        number,
+        body,
+        kind,
+        correlation_id,
+        job_timeout=settings.llm_timeout_seconds + settings.request_timeout_seconds,
+        meta={
+            "number": number,
+            "body": body,
+            "kind": kind,
+            "correlation_id": correlation_id,
+            "reprocessed_from_dead_letter": True,
+        },
+    )
+    job.delete()
+    return True

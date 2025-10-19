@@ -18,7 +18,7 @@ class RateLimiter:
         pipeline.zremrangebyscore(key, 0, window_start)
         pipeline.zadd(key, {str(now): now})
         pipeline.zcard(key)
-        pipeline.expire(key, settings.rate_limit_window_seconds)
+        pipeline.expire(key, settings.rate_limit_ttl)
         _, _, count, _ = pipeline.execute()
         return count <= limit
 

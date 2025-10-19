@@ -22,12 +22,12 @@
 
 # Ações Prioritárias
 
-1. **Orquestração e Alta Disponibilidade**: configurar supervisão (systemd, Supervisor ou Docker healthchecks) para múltiplos workers RQ com auto-restart e filas de dead-letter.
-2. **Gestão de Segredos**: integrar vault/secret manager, estabelecer rotação periódica e segregação por ambiente (staging/prod) para tokens Whaticket e credenciais LLM.
-3. **Governança Redis**: definir TTLs claros para contexto e rate limiting, adicionar métricas de uso de memória e alertas de saturação.
-4. **Automação de Migrações**: usar Alembic em pipeline CI/CD com validação pré-deploy e rollback automatizado em caso de falha.
-5. **Segurança do Painel**: implementar autenticação (SSO ou JWT interno), controle de permissão e revisão de logs de acesso.
-6. **Resiliência de Integrações**: adicionar fila de DLQ e mecanismo de reprocessamento manual para mensagens não entregues; registrar métricas por cliente/campanha.
+1. ✅ **Orquestração e Alta Disponibilidade**: configurar supervisão (systemd, Supervisor ou Docker healthchecks) para múltiplos workers RQ com auto-restart e filas de dead-letter.
+2. ✅ **Gestão de Segredos**: integrar vault/secret manager, estabelecer rotação periódica e segregação por ambiente (staging/prod) para tokens Whaticket e credenciais LLM.
+3. ✅ **Governança Redis**: definir TTLs claros para contexto e rate limiting, adicionar métricas de uso de memória e alertas de saturação.
+4. ✅ **Automação de Migrações**: usar Alembic em pipeline CI/CD com validação pré-deploy e rollback automatizado em caso de falha.
+5. ✅ **Segurança do Painel**: implementar autenticação (SSO ou JWT interno), controle de permissão e revisão de logs de acesso.
+6. ✅ **Resiliência de Integrações**: adicionar fila de DLQ e mecanismo de reprocessamento manual para mensagens não entregues; registrar métricas por cliente/campanha.
 7. **Validação de Carga**: executar testes de carga sobre o endpoint /webhook para calibrar timeouts, limites por IP/número e dimensionamento do RQ.
 8. **Monitoramento Fino**: criar dashboards Prometheus/Grafana com alertas para latência do LLM, falhas Whaticket e backlog da fila.
 
@@ -40,3 +40,12 @@
 - **Fallback Multicanal**: suporte a canais alternativos (e-mail, SMS) quando Whaticket estiver indisponível.
 - **Testes End-to-End do Painel**: automação com Playwright/Cypress para garantir estabilidade da UI.
 - **Feature Flags**: introduzir toggles para habilitar/desabilitar integrações ou modelos LLM conforme necessidade operacional.
+
+# Progresso Atual
+
+- Supervisão dos workers com `supervisord` (múltiplos processos, auto-restart e monitor loop com `rq info`) e suporte a fila de dead-letter dedicada.
+- Implementação da fila `dead_letter` com registro automático e função de reprocessamento manual.
+- TTLs configuráveis para contexto e rate limiting no Redis, além de métricas de uso de memória expostas via Prometheus.
+- Script `scripts/rotate_secrets.py` para rotação dos tokens sensíveis (Whaticket, WhatsApp, LLM e painel).
+- Target `make migrate` para aplicar migrações e exemplo `ci-migrate` com rollback automático.
+- Autenticação do painel via JWT e senha definida no `.env`, com fluxo de login simples na UI.

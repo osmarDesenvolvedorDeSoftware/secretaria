@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from functools import wraps
+
 from flask import Blueprint, current_app, jsonify, render_template, request
 from sqlalchemy import func, select
 
 from app import get_db_session
+from app.config import settings
 from app.models.project import Project
+from app.services.auth import encode_jwt, verify_jwt
 
 bp = Blueprint("projects", __name__)
 
@@ -20,7 +24,59 @@ def _project_to_dict(project: Project) -> dict[str, object]:
     }
 
 
+def _extract_token() -> str | None:
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.lower().startswith("bearer "):
+        return auth_header.split(" ", 1)[1].strip()
+    cookie_token = request.cookies.get("panel_token")
+    if cookie_token:
+        return cookie_token
+    return None
+
+
+def require_panel_auth(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        token = _extract_token()
+        payload = verify_jwt(token, settings.panel_jwt_secret)
+        if payload is None:
+            return jsonify({"error": "unauthorized"}), 401
+        request.panel_identity = payload  # type: ignore[attr-defined]
+        return func(*args, **kwargs)
+
+    return wrapper
+
+
+@bp.post("/auth/token")
+def issue_panel_token():
+    payload = request.get_json(silent=True) or {}
+    password = str(payload.get("password") or "")
+    if not settings.panel_password:
+        return jsonify({"error": "panel_password_not_configured"}), 503
+    if password != settings.panel_password:
+        return jsonify({"error": "invalid_credentials"}), 401
+
+    token = encode_jwt({"sub": "panel"}, settings.panel_jwt_secret, settings.panel_token_ttl_seconds)
+    response = jsonify(
+        {
+            "access_token": token,
+            "token_type": "bearer",
+            "expires_in": settings.panel_token_ttl_seconds,
+        }
+    )
+    response.set_cookie(
+        "panel_token",
+        token,
+        max_age=settings.panel_token_ttl_seconds,
+        httponly=True,
+        secure=False,
+        samesite="Lax",
+    )
+    return response
+
+
 @bp.get("/projects/")
+@require_panel_auth
 def list_projects():
     with get_db_session(current_app) as session:
         result = session.execute(
@@ -31,6 +87,7 @@ def list_projects():
 
 
 @bp.post("/projects/")
+@require_panel_auth
 def create_project():
     payload = request.get_json(silent=True) or {}
     project = Project(
@@ -52,6 +109,7 @@ def create_project():
 
 
 @bp.put("/projects/<int:project_id>")
+@require_panel_auth
 def update_project(project_id: int):
     payload = request.get_json(silent=True) or {}
     with get_db_session(current_app) as session:
@@ -70,6 +128,7 @@ def update_project(project_id: int):
 
 
 @bp.delete("/projects/<int:project_id>")
+@require_panel_auth
 def delete_project(project_id: int):
     with get_db_session(current_app) as session:
         project = session.get(Project, project_id)
@@ -81,6 +140,7 @@ def delete_project(project_id: int):
 
 
 @bp.get("/projects/stats")
+@require_panel_auth
 def project_stats():
     with get_db_session(current_app) as session:
         rows = session.execute(
