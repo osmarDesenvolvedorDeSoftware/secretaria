@@ -159,6 +159,24 @@ appointments_total = Counter(
     ["company"],
 )
 
+appointments_risk_high_total = Counter(
+    f"{settings.metrics_namespace}_appointments_risk_high_total",
+    "Total de agendamentos marcados como alto risco de no-show",
+    ["company"],
+)
+
+appointments_auto_rescheduled_total = Counter(
+    f"{settings.metrics_namespace}_appointments_auto_rescheduled_total",
+    "Total de reagendamentos automáticos disparados pela IA",
+    ["company"],
+)
+
+agenda_optimization_runs_total = Counter(
+    f"{settings.metrics_namespace}_agenda_optimization_runs_total",
+    "Execuções do otimizador de agenda por empresa",
+    ["company"],
+)
+
 appointment_reminders_sent_total = Counter(
     f"{settings.metrics_namespace}_appointment_reminders_sent_total",
     "Total de lembretes de agendamentos enviados",

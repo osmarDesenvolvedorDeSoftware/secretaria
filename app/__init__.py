@@ -34,6 +34,7 @@ from .metrics import (
 )
 from .services.analytics_service import AnalyticsService
 from .services.billing import BillingService
+from .services.scheduler_service import SchedulerService
 from .services.tenancy import (
     build_tenant_context,
     extract_domain_from_request,
@@ -107,19 +108,25 @@ def init_app() -> Flask:
     app._queue_cache: dict[str, Queue] = {}
     app._dead_letter_queue_cache: dict[str, Queue] = {}
 
+    queue_class = Queue
+    worker_class = Worker
+    app.queue_class = queue_class  # type: ignore[attr-defined]
+    app.worker_class = worker_class  # type: ignore[attr-defined]
     def get_task_queue(company_id: int) -> Queue:
         name = queue_name_for_company(settings.queue_name, company_id)
+        queue_cls = getattr(app, "queue_class", queue_class)
         queue = app._queue_cache.get(name)
-        if queue is None:
-            queue = Queue(name, connection=redis_client)
+        if queue is None or not isinstance(queue, queue_cls):
+            queue = queue_cls(name, connection=redis_client)
             app._queue_cache[name] = queue
         return queue
 
     def get_dead_letter_queue(company_id: int) -> Queue:
         name = queue_name_for_company(settings.dead_letter_queue_name, company_id)
+        queue_cls = getattr(app, "queue_class", queue_class)
         queue = app._dead_letter_queue_cache.get(name)
-        if queue is None:
-            queue = Queue(name, connection=redis_client)
+        if queue is None or not isinstance(queue, queue_cls):
+            queue = queue_cls(name, connection=redis_client)
             app._dead_letter_queue_cache[name] = queue
         return queue
 
@@ -132,6 +139,13 @@ def init_app() -> Flask:
     billing_service = BillingService(SessionLocal, redis_client, analytics_service)
     app.analytics_service = analytics_service  # type: ignore[attr-defined]
     app.billing_service = billing_service  # type: ignore[attr-defined]
+
+    scheduler_service = SchedulerService(redis_client, SessionLocal, get_task_queue)
+    app.scheduler_service = scheduler_service  # type: ignore[attr-defined]
+    try:
+        scheduler_service.ensure_daily_agenda_optimization()
+    except Exception:
+        LOGGER.warning("scheduler_initialization_failed")
 
     @app.teardown_appcontext
     def remove_session(exception: Exception | None) -> None:
@@ -253,8 +267,13 @@ def init_app() -> Flask:
             redis_memory_usage_gauge.labels("critical_threshold").set(
                 float(settings.redis_memory_critical_bytes)
             )
+            worker_cls = getattr(app, "worker_class", Worker)
             try:
-                worker_count = len(Worker.all(connection=redis_client))  # type: ignore[arg-type]
+                if hasattr(worker_cls, "all"):
+                    workers = worker_cls.all(connection=redis_client)  # type: ignore[arg-type]
+                    worker_count = len(workers)
+                else:
+                    worker_count = 0
             except Exception:
                 worker_count = 0
             active_workers_gauge.set(worker_count)

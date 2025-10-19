@@ -13,6 +13,7 @@ from rq.job import Job
 from app.metrics import (
     appointment_confirmations_total,
     appointment_reschedules_total,
+    appointments_risk_high_total,
     fallback_transfers_total,
     llm_prompt_injection_blocked_total,
     message_usage_total,
@@ -29,7 +30,7 @@ from app.services.abtest_service import ABTestService
 from app.services.analytics_service import AnalyticsService
 from app.services.billing import BillingService
 from app.services.context_engine import ContextEngine, RuntimeContext
-from app.services import cal_service
+from app.services import cal_service, scheduling_ai
 from app.services.llm import LLMClient
 from app.services.audit import AuditService
 from app.services.persistence import (
@@ -217,6 +218,24 @@ def _handle_agenda_flow(
                 }
             )
 
+        if state_extra:
+            preferred_slot = state_extra.get("preferred_slot") if isinstance(state_extra, dict) else None
+            if isinstance(preferred_slot, dict):
+                preferred_weekday = preferred_slot.get("weekday")
+                preferred_hour = preferred_slot.get("hour")
+                for index, option in enumerate(list(prepared_options)):
+                    start_dt = _parse_iso_datetime(option.get("start"))
+                    if (
+                        start_dt
+                        and preferred_weekday is not None
+                        and preferred_hour is not None
+                        and start_dt.weekday() == preferred_weekday
+                        and start_dt.hour == preferred_hour
+                    ):
+                        preferred_option = prepared_options.pop(index)
+                        prepared_options.insert(0, preferred_option)
+                        break
+
         state_payload: dict[str, object] = {
             "phase": phase,
             "options": prepared_options,
@@ -289,9 +308,49 @@ def _handle_agenda_flow(
             service.context_engine.clear_agenda_state(number)
             return "Sem problemas! Me diga qual período prefere que eu verifico novos horários."
 
-        return "Por favor, responda com o número da opção desejada ou informe outro horário que eu verifico para você."
+            return "Por favor, responda com o número da opção desejada ou informe outro horário que eu verifico para você."
 
     upcoming = _get_upcoming()
+
+    if (
+        upcoming
+        and (not state or not state.get("risk_flagged"))
+        and intention not in {"appointment_confirmation", "appointment_reschedule"}
+        and (upcoming.status or "").lower() != "confirmed"
+    ):
+        probability = scheduling_ai.prever_no_show(upcoming)
+        if probability >= scheduling_ai.HIGH_RISK_THRESHOLD:
+            suggestions = scheduling_ai.sugerir_horarios_otimizados(service.company_id)
+            best = suggestions[0] if suggestions else None
+            human_current = _humanize_start(upcoming.start_time)
+            if best:
+                intro = (
+                    f"Percebi que {human_current} costuma ter mais faltas. "
+                    f"Recomendo um horário como {best['label']}. Veja estas opções:"
+                )
+                preferred_slot = {"weekday": best["weekday"], "hour": best["hour"]}
+            else:
+                intro = (
+                    f"Percebi que {human_current} tem risco alto de falta. Vamos escolher outro horário?"
+                )
+                preferred_slot = None
+            state_extra: dict[str, object] = {
+                "risk_flagged": True,
+                "risk_probability": probability,
+                "original_appointment_id": upcoming.id,
+            }
+            if preferred_slot is not None:
+                state_extra["preferred_slot"] = preferred_slot
+            appointments_risk_high_total.labels(company=service.company_label).inc()
+            reschedule_message = _prepare_options(
+                upcoming.client_name or template_vars.get("nome") or "Cliente",
+                upcoming.title or f"Reunião com {upcoming.client_name or 'Cliente'}",
+                "awaiting_reschedule",
+                state_extra,
+                intro,
+            )
+            if isinstance(reschedule_message, str):
+                return reschedule_message
 
     if intention == "appointment_confirmation":
         if upcoming is None:

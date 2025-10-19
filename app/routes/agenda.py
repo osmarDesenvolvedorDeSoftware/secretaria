@@ -10,7 +10,7 @@ from flask import Blueprint, current_app, jsonify, request
 from app.metrics import webhook_received_counter
 from app.models import Appointment, Company
 from app.routes.panel_auth import require_panel_auth, require_panel_company_id
-from app.services import cal_service, reminder_service
+from app.services import auto_reschedule_service, cal_service, reminder_service, scheduling_ai
 from app.services.whaticket import WhaticketError
 
 
@@ -78,6 +78,25 @@ def list_appointments():
         session.close()
 
 
+@agenda_bp.get("/insights")
+@require_panel_auth
+def get_insights():
+    try:
+        company_id = _resolve_company_id(request.args.get("company_id"))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    insights = scheduling_ai.obter_insights(company_id)
+    if not insights.get("heatmap"):
+        try:
+            insights = scheduling_ai.analisar_padroes(company_id)
+        except Exception as exc:  # pragma: no cover - log apenas
+            LOGGER.warning("agenda_insights_failed", company_id=company_id, error=str(exc))
+            return jsonify({"error": "analysis_failed"}), 500
+
+    return jsonify(insights)
+
+
 @agenda_bp.post("/book")
 @require_panel_auth
 def book_slot():
@@ -102,6 +121,46 @@ def book_slot():
     except cal_service.CalServiceError as exc:
         LOGGER.warning("book_error", error=str(exc), company_id=company_id)
         return jsonify({"error": "cal_unavailable"}), 502
+
+    return jsonify(result)
+
+
+@agenda_bp.post("/auto-reschedule")
+@require_panel_auth
+def trigger_auto_reschedule():
+    payload = request.get_json(silent=True) or {}
+    try:
+        company_id = _resolve_company_id(payload.get("company_id"))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    threshold_value = payload.get("threshold")
+    lookahead_value = payload.get("lookahead_hours")
+    try:
+        threshold = (
+            float(threshold_value)
+            if threshold_value is not None
+            else auto_reschedule_service.DEFAULT_THRESHOLD
+        )
+    except (TypeError, ValueError):
+        threshold = auto_reschedule_service.DEFAULT_THRESHOLD
+    try:
+        lookahead_hours = (
+            int(lookahead_value)
+            if lookahead_value is not None
+            else auto_reschedule_service.DEFAULT_LOOKAHEAD_HOURS
+        )
+    except (TypeError, ValueError):
+        lookahead_hours = auto_reschedule_service.DEFAULT_LOOKAHEAD_HOURS
+
+    try:
+        result = auto_reschedule_service.executar_reagendamento(
+            company_id,
+            threshold=threshold,
+            lookahead_hours=lookahead_hours,
+        )
+    except auto_reschedule_service.AutoRescheduleError as exc:
+        return jsonify({"error": str(exc)}), 400
 
     return jsonify(result)
 

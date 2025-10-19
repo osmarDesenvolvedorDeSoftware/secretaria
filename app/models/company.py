@@ -64,6 +64,11 @@ class Company(Base):
         back_populates="company",
         cascade="all, delete-orphan",
     )
+    scheduling_insights = relationship(
+        "SchedulingInsights",
+        back_populates="company",
+        cascade="all, delete-orphan",
+    )
 
     def __repr__(self) -> str:  # pragma: no cover - utilitário de debug
         return f"<Company id={self.id} name={self.name!r} domain={self.domain!r}>"

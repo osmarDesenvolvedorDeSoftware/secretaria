@@ -73,6 +73,15 @@
   - Fluxo de confirmação/reagendamento no WhatsApp com atualização de status, métricas (`appointment_*_total`) e suporte a reagendamentos Cal.com.
   - `no_show_service` com checagem pós-evento, feedback automático “Cliente não compareceu” e painel “Agenda Inteligente” aprimorado (filtros rápidos, taxa de presença, botão “Enviar lembrete agora”).
 
+## Release v2.3 – Concluído
+
+- Status: ✅ Disponível – IA de otimização de agenda, previsões de no-show e reagendamento automático em produção.
+- Entregas principais:
+  - Novo módulo `scheduling_ai` com análise histórica (tabela `scheduling_insights`), previsão de ausência e sugestões priorizadas.
+  - Serviço `auto_reschedule_service` com consulta Cal.com, disparo proativo via WhatsApp e atualização do `ContextEngine`.
+  - `SchedulerService` garantindo execução diária via RQ, métricas Prometheus (`appointments_risk_high_total`, `appointments_auto_rescheduled_total`, `agenda_optimization_runs_total`) e dashboard Grafana “Agenda IA”.
+  - Painel “Insights de Agenda” com gráfico de horários eficientes, recomendação textual e botão “Reagendar automaticamente faltas”.
+
 | Componente | Status | Observações |
 | --- | --- | --- |
 | Backend Flask (rotas/serviços) | ⚙️ Em validação | Webhook e painel multiempresa concluídos; pendem testes extras para billing e limites por tenant. |
