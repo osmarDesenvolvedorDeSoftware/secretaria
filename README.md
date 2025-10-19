@@ -1,6 +1,6 @@
 # Secretaria Virtual Whaticket
 
-[![Release](https://img.shields.io/badge/version-v1.1-blue.svg)](docs/release_v1.1.md)
+[![Release](https://img.shields.io/badge/version-v1.2-blue.svg)](docs/release_v1.2.md)
 
 Arquitetura pronta para produção para uma secretária virtual integrada ao Whaticket com Flask, Redis, RQ e PostgreSQL.
 
@@ -8,8 +8,10 @@ Arquitetura pronta para produção para uma secretária virtual integrada ao Wha
 
 - 📄 [Documentação de release v1.0](docs/release_v1.0.md)
 - 📄 [Documentação de release v1.1](docs/release_v1.1.md)
+- 📄 [Documentação de release v1.2](docs/release_v1.2.md)
 
 * **Multi-tenancy completo** com isolamento por empresa em banco, Redis, filas RQ e JWT multiempresa.
+* **Provisionamento automático** via `/api/tenants/provision` com criação de planos, assinaturas, schemas e redis dedicados.
 * **Gestão de planos e billing** com modelos `Plan`/`Subscription` e `BillingService` com webhooks.
 * **Webhook seguro** com validação HMAC (`X-Signature`) e token opcional (`X-Webhook-Token`).
 * **Persistência** de conversas e logs de entrega em PostgreSQL (SQLAlchemy + Alembic).
@@ -17,7 +19,7 @@ Arquitetura pronta para produção para uma secretária virtual integrada ao Wha
 * **Fila assíncrona** com RQ para chamadas ao LLM e envio ao Whaticket.
 * **Integração Whaticket** com token estático ou login JWT opcional com cache em Redis.
 * **Cliente Gemini** com retries, timeout e circuit breaker.
-* **Observabilidade** com logs estruturados (structlog) e métricas Prometheus em `/metrics` segmentadas por empresa.
+* **Observabilidade** com logs estruturados (structlog) e métricas Prometheus em `/metrics` segmentadas por empresa (incluindo workers por tenant).
 * **Segurança** com sanitização, proteção contra prompt-injection e CORS desabilitado no webhook.
 * **Testes** com pytest + cobertura e ambiente Docker pronto.
 
@@ -40,6 +42,14 @@ Arquitetura pronta para produção para uma secretária virtual integrada ao Wha
 2. Registre empresas com domínio único e vincule um plano ativo.
 3. Configure o webhook de pagamento no provedor (ex.: Stripe, Mercado Pago ou manual) apontando para `/webhook/billing` com o header `X-Company-Domain`.
 4. Garanta que clientes externos enviem `X-Company-Domain` ou incluam `company_id` no JWT para roteamento correto.
+
+### Provisionamento automático de tenants
+
+1. Autentique-se no painel (`/painel`) e utilize a seção **Nova Empresa** para informar nome, domínio, slug e plano.
+2. O backend criará registros de `Plan`, `Company` e `Subscription`, um schema PostgreSQL (`tenant_<id>`), Redis isolado e fila RQ.
+3. O painel exibirá o progresso do provisionamento e fornecerá o token inicial de acesso e o comando `python scripts/spawn_worker.py --company-id <id>`.
+4. Após o deploy, execute `scripts/deploy.sh --tenant-id <id> --domain exemplo.com` para registrar subdomínios `chat.<tenant>.exemplo.com` e `api.<tenant>.exemplo.com` com status de SSL.
+5. Inicie o worker dedicado com `python scripts/spawn_worker.py --company-id <id>` (opcionalmente definindo `--queue` ou `--burst`).
 
 ## Comandos Principais
 

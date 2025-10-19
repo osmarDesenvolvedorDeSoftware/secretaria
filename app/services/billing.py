@@ -187,15 +187,66 @@ class BillingService:
                 .order_by(Subscription.started_at.desc())
                 .first()
             )
-            usage = {}
+            usage: dict[str, int] = {}
+            provisioning: dict[str, str] = {}
+            domain_info: dict[str, str] = {}
+            infrastructure: dict[str, str] = {}
+            worker_count = 0
             if self.redis is not None:
                 usage_key = namespaced_key(company_id, "usage")
-                data = self.redis.hgetall(usage_key)
-                if isinstance(data, dict):
-                    usage = {
-                        key.decode() if isinstance(key, (bytes, bytearray)) else str(key): int(value)
-                        for key, value in data.items()
-                    }
+                provisioning_key = namespaced_key(company_id, "provisioning")
+                domain_key = namespaced_key(company_id, "domains")
+                infra_key = namespaced_key(company_id, "infrastructure")
+
+                def _decode_map(raw: dict) -> dict[str, str]:
+                    decoded: dict[str, str] = {}
+                    for key, value in raw.items():
+                        key_str = key.decode() if isinstance(key, (bytes, bytearray)) else str(key)
+                        if isinstance(value, (bytes, bytearray)):
+                            decoded[key_str] = value.decode()
+                        else:
+                            decoded[key_str] = str(value)
+                    return decoded
+
+                try:
+                    usage_raw = self.redis.hgetall(usage_key)
+                    if isinstance(usage_raw, dict):
+                        decoded_usage = _decode_map(usage_raw)
+                        parsed_usage: dict[str, int] = {}
+                        for key, value in decoded_usage.items():
+                            try:
+                                parsed_usage[key] = int(value)
+                            except (TypeError, ValueError):
+                                continue
+                        usage = parsed_usage
+                except Exception:
+                    usage = {}
+
+                try:
+                    provisioning_raw = self.redis.hgetall(provisioning_key)
+                    if isinstance(provisioning_raw, dict):
+                        provisioning = _decode_map(provisioning_raw)
+                except Exception:
+                    provisioning = {}
+
+                try:
+                    domain_raw = self.redis.hgetall(domain_key)
+                    if isinstance(domain_raw, dict):
+                        domain_info = _decode_map(domain_raw)
+                except Exception:
+                    domain_info = {}
+
+                try:
+                    infra_raw = self.redis.hgetall(infra_key)
+                    if isinstance(infra_raw, dict):
+                        infrastructure = _decode_map(infra_raw)
+                except Exception:
+                    infrastructure = {}
+
+                try:
+                    worker_count = int(self.redis.scard(namespaced_key(company_id, "workers")))
+                except Exception:
+                    worker_count = 0
             return {
                 "company_id": company.id,
                 "company_name": company.name,
@@ -204,6 +255,10 @@ class BillingService:
                 "plan": plan.to_dict() if plan else None,
                 "subscription": subscription.to_dict() if subscription else None,
                 "usage": usage,
+                "provisioning": provisioning,
+                "domains": domain_info,
+                "infrastructure": infrastructure,
+                "worker_count": worker_count,
             }
         finally:
             session.close()

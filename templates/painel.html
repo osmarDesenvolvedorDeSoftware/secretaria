@@ -41,6 +41,68 @@
         </div>
       </div>
 
+      <div id="provision-card" class="card shadow-sm mb-4 d-none">
+        <div class="card-body">
+          <h5 class="card-title">Nova Empresa</h5>
+          <p class="text-muted">Configure rapidamente uma nova empresa com plano, domínios e infraestrutura isolada.</p>
+          <div id="provision-alert" class="alert d-none" role="alert"></div>
+          <form id="form-provision" class="row g-3">
+            <div class="col-md-6">
+              <label for="provision-company-name" class="form-label">Nome da empresa</label>
+              <input type="text" class="form-control" id="provision-company-name" required>
+            </div>
+            <div class="col-md-6">
+              <label for="provision-domain" class="form-label">Domínio principal</label>
+              <input type="text" class="form-control" id="provision-domain" placeholder="empresa.com.br" required>
+            </div>
+            <div class="col-md-4">
+              <label for="provision-base-domain" class="form-label">Domínio base (plataforma)</label>
+              <input type="text" class="form-control" id="provision-base-domain" placeholder="minhasa.com">
+            </div>
+            <div class="col-md-4">
+              <label for="provision-tenant-slug" class="form-label">Slug do tenant</label>
+              <input type="text" class="form-control" id="provision-tenant-slug" placeholder="empresa">
+            </div>
+            <div class="col-md-4">
+              <label for="provision-billing-cycle" class="form-label">Ciclo de cobrança</label>
+              <select class="form-select" id="provision-billing-cycle">
+                <option value="mensal" selected>Mensal</option>
+                <option value="trimestral">Trimestral</option>
+                <option value="anual">Anual</option>
+              </select>
+            </div>
+            <div class="col-md-6">
+              <label for="provision-plan-name" class="form-label">Nome do plano</label>
+              <input type="text" class="form-control" id="provision-plan-name" placeholder="Plano Premium" required>
+            </div>
+            <div class="col-md-3">
+              <label for="provision-plan-price" class="form-label">Valor mensal (R$)</label>
+              <input type="number" class="form-control" id="provision-plan-price" min="0" step="0.01" value="0">
+            </div>
+            <div class="col-md-3">
+              <label for="provision-plan-messages" class="form-label">Limite de mensagens</label>
+              <input type="number" class="form-control" id="provision-plan-messages" min="100" step="50" value="1000">
+            </div>
+            <div class="col-md-6">
+              <label for="provision-plan-tokens" class="form-label">Limite de tokens</label>
+              <input type="number" class="form-control" id="provision-plan-tokens" min="1000" step="1000" value="500000">
+            </div>
+            <div class="col-md-6">
+              <label for="provision-plan-features" class="form-label">Recursos do plano</label>
+              <textarea class="form-control" id="provision-plan-features" rows="3" placeholder="Atendimento 24/7\nChatbot avançado\nIntegração Whaticket"></textarea>
+            </div>
+            <div class="col-12 d-flex justify-content-end">
+              <button type="submit" class="btn btn-primary">Provisionar empresa</button>
+            </div>
+          </form>
+          <div id="provision-progress-wrapper" class="mt-4 d-none">
+            <h6 class="mb-2">Progresso do provisionamento</h6>
+            <ul class="list-group" id="provision-progress"></ul>
+          </div>
+          <div id="provision-credentials" class="alert alert-secondary mt-4 d-none"></div>
+        </div>
+      </div>
+
       <div id="config-card" class="card shadow-sm mb-4 d-none">
         <div class="card-body">
           <h5 class="card-title">Configurações de Personalização</h5>
@@ -113,6 +175,7 @@
                   <th>Domínio</th>
                   <th>Plano</th>
                   <th>Status</th>
+                  <th>Provisionamento</th>
                   <th>Mensagens</th>
                   <th>Tokens</th>
                   <th>Vencimento</th>
@@ -149,6 +212,25 @@
       const previewCard = document.getElementById('preview-card');
       const previewMessage = document.getElementById('preview-message');
       const previewIntention = document.getElementById('preview-intention');
+      const provisionCard = document.getElementById('provision-card');
+      const provisionForm = document.getElementById('form-provision');
+      const provisionAlert = document.getElementById('provision-alert');
+      const provisionProgressWrapper = document.getElementById('provision-progress-wrapper');
+      const provisionProgress = document.getElementById('provision-progress');
+      const provisionCredentials = document.getElementById('provision-credentials');
+      const provisionTenantSlugInput = document.getElementById('provision-tenant-slug');
+      const provisionCompanyInput = document.getElementById('provision-company-name');
+
+      if (provisionCompanyInput && provisionTenantSlugInput) {
+        provisionCompanyInput.addEventListener('blur', () => {
+          if (!provisionTenantSlugInput.value.trim()) {
+            const slug = generateSlug(provisionCompanyInput.value.trim());
+            if (slug) {
+              provisionTenantSlugInput.value = slug;
+            }
+          }
+        });
+      }
 
       function updateSliderDisplays() {
         const formalityDisplay = document.getElementById('formality-display');
@@ -158,6 +240,124 @@
         }
         if (empathyDisplay && empathyRange) {
           empathyDisplay.textContent = empathyRange.value;
+        }
+      }
+
+      function statusBadge(label, status) {
+        const normalized = String(status || '').toLowerCase();
+        let badgeClass = 'bg-secondary';
+        if (['ready', 'active', 'ativa', 'concluido', 'concluida', 'ok', 'sucesso'].includes(normalized)) {
+          badgeClass = 'bg-success';
+        } else if (['pending', 'aguardando', 'awaiting', 'pendente'].includes(normalized)) {
+          badgeClass = 'bg-warning text-dark';
+        } else if (['erro', 'failed', 'cancelado', 'cancelada'].includes(normalized)) {
+          badgeClass = 'bg-danger';
+        } else if (['running', 'executando'].includes(normalized)) {
+          badgeClass = 'bg-info text-dark';
+        }
+        const labelText = `${label}: ${normalized || '-'}`;
+        return `<span class="badge ${badgeClass} me-1">${labelText}</span>`;
+      }
+
+      function planLimitLabel(plan) {
+        if (!plan) {
+          return '-';
+        }
+        const messagesRaw = plan.limite_mensagens ?? plan.message_limit;
+        const tokensRaw = plan.limite_tokens ?? plan.token_limit;
+        const messages = Number(messagesRaw);
+        const tokens = Number(tokensRaw);
+        const messagesLabel = Number.isFinite(messages) && messages > 0
+          ? messages.toLocaleString('pt-BR')
+          : '-';
+        const tokensLabel = Number.isFinite(tokens) && tokens > 0
+          ? tokens.toLocaleString('pt-BR')
+          : '-';
+        return `${messagesLabel} msgs / ${tokensLabel} tokens`;
+      }
+
+      function generateSlug(value) {
+        if (!value) {
+          return '';
+        }
+        return value
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/[^a-z0-9_-]+/g, '-')
+          .replace(/[-_]{2,}/g, '-')
+          .replace(/^[-_]+|[-_]+$/g, '')
+          .substring(0, 48);
+      }
+
+      function resetProvisionFeedback() {
+        if (provisionAlert) {
+          provisionAlert.className = 'alert d-none';
+          provisionAlert.textContent = '';
+        }
+        if (provisionProgressWrapper) {
+          provisionProgressWrapper.classList.add('d-none');
+        }
+        if (provisionProgress) {
+          provisionProgress.innerHTML = '';
+        }
+        if (provisionCredentials) {
+          provisionCredentials.classList.add('d-none');
+          provisionCredentials.textContent = '';
+        }
+      }
+
+      function renderProvisioningProgress(result) {
+        if (!result || !provisionProgress || !provisionProgressWrapper) {
+          return;
+        }
+        const infrastructure = result.infrastructure || {};
+        const domains = result.domains || {};
+        const steps = [
+          {
+            label: 'Banco de dados',
+            status: 'ready',
+            description: infrastructure.schema ? `Schema ${infrastructure.schema}` : 'Schema provisionado',
+          },
+          {
+            label: 'Fila RQ / Redis',
+            status: 'ready',
+            description: `Fila ${infrastructure.queue || '-'} / ${infrastructure.redis_url || '-'}`,
+          },
+          {
+            label: 'Domínios',
+            status: domains.domain_status || 'pendente',
+            description: `chat: ${domains.chat_domain || '-'} · api: ${domains.api_domain || '-'}`,
+          },
+          {
+            label: 'Worker',
+            status: 'aguardando',
+            description: infrastructure.worker_hint || 'Execute scripts/spawn_worker.py',
+          },
+        ];
+        provisionProgress.innerHTML = steps
+          .map((step) => `
+            <li class="list-group-item d-flex justify-content-between align-items-start">
+              <div class="me-3">
+                <div class="fw-bold">${step.label}</div>
+                <div class="small text-muted">${step.description}</div>
+              </div>
+              ${statusBadge('Status', step.status)}
+            </li>
+          `)
+          .join('');
+        provisionProgressWrapper.classList.remove('d-none');
+
+        if (provisionCredentials) {
+          const credentials = result.credentials || {};
+          if (credentials.panel_token) {
+            provisionCredentials.innerHTML = `
+              <strong>Token inicial:</strong>
+              <code>${credentials.panel_token}</code>
+              <div class="small text-muted">Expira em ${credentials.expires_in || '-'} segundos.</div>
+            `;
+            provisionCredentials.classList.remove('d-none');
+          }
         }
       }
 
@@ -248,6 +448,9 @@
           }
           logoutButton.classList.remove('d-none');
           document.getElementById('login-card').classList.add('d-none');
+          if (provisionCard) {
+            provisionCard.classList.remove('d-none');
+          }
           updatePreview();
         } else {
           localStorage.removeItem('panel_token');
@@ -255,6 +458,10 @@
           currentCompanyId = null;
           logoutButton.classList.add('d-none');
           document.getElementById('login-card').classList.remove('d-none');
+          if (provisionCard) {
+            provisionCard.classList.add('d-none');
+          }
+          resetProvisionFeedback();
           configCard.classList.add('d-none');
           document.getElementById('form-config').reset();
           configAlert.classList.add('d-none');
@@ -405,7 +612,7 @@
           }
           const data = await resposta.json();
           if (!Array.isArray(data) || data.length === 0) {
-            companiesTable.innerHTML = '<tr><td colspan="7" class="text-muted">Nenhuma empresa cadastrada.</td></tr>';
+            companiesTable.innerHTML = '<tr><td colspan="8" class="text-muted">Nenhuma empresa cadastrada.</td></tr>';
             companiesCount.textContent = '0 empresas';
             companiesCard.classList.remove('d-none');
             return;
@@ -419,12 +626,54 @@
             const usage = empresa.usage || {};
             const messagesTotal = (usage.messages_inbound || 0) + (usage.messages_outbound || 0);
             const tokensTotal = (usage.tokens_inbound || 0) + (usage.tokens_outbound || 0);
+            const domains = empresa.domains || {};
+            const provisioning = empresa.provisioning || {};
+            const infrastructure = empresa.infrastructure || {};
+            const workerCount = Number.isFinite(Number(empresa.worker_count)) ? Number(empresa.worker_count) : 0;
+            const domainStatus = domains.domain_status || provisioning.domain_status || 'pendente';
+            const sslStatus = domains.ssl_status || provisioning.ssl_status || 'pendente';
+            const chatDomain = domains.chat_domain || '-';
+            const apiDomain = domains.api_domain || '-';
+            const schemaName = infrastructure.schema || '-';
+            const queueName = infrastructure.queue || '-';
+            const redisUrl = infrastructure.redis_url || '-';
+            const steps = [
+              { key: 'database', label: 'Banco', status: provisioning.database_status || 'pendente' },
+              { key: 'queue', label: 'Fila', status: provisioning.queue_status || 'pendente' },
+              { key: 'domain', label: 'Domínio', status: domainStatus },
+              { key: 'ssl', label: 'SSL', status: sslStatus },
+              { key: 'worker', label: 'Worker', status: provisioning.worker_status || 'aguardando' },
+            ];
+            const badges = steps.map((step) => statusBadge(step.label, step.status)).join(' ');
             return `
               <tr>
-                <td>${empresa.company_name}</td>
-                <td>${empresa.domain || '-'}</td>
-                <td>${planName}</td>
-                <td>${subscriptionStatus.toUpperCase()}</td>
+                <td>
+                  <strong>${empresa.company_name}</strong><br>
+                  <span class="badge bg-secondary">ID ${empresa.company_id}</span>
+                </td>
+                <td>
+                  <div>${empresa.domain || '-'}</div>
+                  <div class="small text-muted">chat: ${chatDomain}</div>
+                  <div class="small text-muted">api: ${apiDomain}</div>
+                  <div class="mt-1">
+                    ${statusBadge('Domínio', domainStatus)}
+                    ${statusBadge('SSL', sslStatus)}
+                  </div>
+                </td>
+                <td>
+                  ${planName}<br>
+                  <span class="small text-muted">Mensagens: ${planLimitLabel(empresa.plan)}</span>
+                </td>
+                <td>
+                  ${subscriptionStatus.toUpperCase()}<br>
+                  <span class="small text-muted">Workers ativos: ${workerCount}</span>
+                </td>
+                <td>
+                  ${badges}
+                  <div class="small text-muted mt-1">Schema: ${schemaName}</div>
+                  <div class="small text-muted">Fila: ${queueName}</div>
+                  <div class="small text-muted">Redis: ${redisUrl}</div>
+                </td>
                 <td>${messagesTotal}</td>
                 <td>${tokensTotal}</td>
                 <td>${vencimento}</td>
@@ -439,6 +688,112 @@
           alerta.classList.remove('d-none');
           companiesCard.classList.add('d-none');
         }
+      }
+
+      if (provisionForm) {
+        provisionForm.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          if (!ensureAuthentication()) {
+            return;
+          }
+          resetProvisionFeedback();
+          if (provisionAlert) {
+            provisionAlert.className = 'alert alert-info';
+            provisionAlert.textContent = 'Iniciando provisionamento...';
+            provisionAlert.classList.remove('d-none');
+          }
+
+          const domainInput = document.getElementById('provision-domain');
+          const baseDomainInput = document.getElementById('provision-base-domain');
+          const billingCycleInput = document.getElementById('provision-billing-cycle');
+          const planNameInputField = document.getElementById('provision-plan-name');
+          const planPriceField = document.getElementById('provision-plan-price');
+          const planMessagesField = document.getElementById('provision-plan-messages');
+          const planTokensField = document.getElementById('provision-plan-tokens');
+          const planFeaturesField = document.getElementById('provision-plan-features');
+
+          const companyName = provisionCompanyInput ? provisionCompanyInput.value.trim() : '';
+          const domain = domainInput ? domainInput.value.trim().toLowerCase() : '';
+          const baseDomain = baseDomainInput ? baseDomainInput.value.trim().toLowerCase() : '';
+          const tenantSlug = provisionTenantSlugInput ? provisionTenantSlugInput.value.trim().toLowerCase() : '';
+          const billingCycle = billingCycleInput ? billingCycleInput.value.trim().toLowerCase() : 'mensal';
+          const planName = planNameInputField ? (planNameInputField.value || companyName).trim() : companyName;
+          const planPriceInput = planPriceField ? Number.parseFloat(planPriceField.value || '0') : 0;
+          const planMessagesInput = planMessagesField ? Number.parseInt(planMessagesField.value || '1000', 10) : 1000;
+          const planTokensInput = planTokensField ? Number.parseInt(planTokensField.value || '500000', 10) : 500000;
+          const featuresRaw = planFeaturesField ? planFeaturesField.value.split('\n') : [];
+          const features = featuresRaw
+            .map((feature) => feature.trim())
+            .filter((feature) => feature.length > 0);
+
+          if (!companyName || !domain) {
+            if (provisionAlert) {
+              provisionAlert.className = 'alert alert-danger';
+              provisionAlert.textContent = 'Informe nome e domínio válidos.';
+              provisionAlert.classList.remove('d-none');
+            }
+            return;
+          }
+
+          const payload = {
+            name: companyName,
+            domain,
+            billing_cycle: billingCycle || 'mensal',
+            plan: {
+              name: planName || companyName,
+              price: Number.isFinite(planPriceInput) ? planPriceInput : 0,
+              limite_mensagens: Number.isFinite(planMessagesInput) ? planMessagesInput : 1000,
+              limite_tokens: Number.isFinite(planTokensInput) ? planTokensInput : 500000,
+              features,
+            },
+          };
+          if (baseDomain) {
+            payload.base_domain = baseDomain;
+          }
+          if (tenantSlug) {
+            payload.tenant_slug = tenantSlug;
+          }
+
+          try {
+            const resposta = await fetch('/api/tenants/provision', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${authToken}`,
+              },
+              body: JSON.stringify(payload),
+            });
+            if (resposta.status === 401) {
+              setAuthToken('');
+              throw new Error('Sessão expirada. Faça login novamente.');
+            }
+            const data = await resposta.json();
+            if (!resposta.ok) {
+              const errorMessage = data && data.error ? data.error : 'Provisionamento não pôde ser concluído.';
+              throw new Error(errorMessage);
+            }
+            if (provisionAlert) {
+              const companyLabel = data && data.company && data.company.name
+                ? data.company.name
+                : companyName;
+              provisionAlert.className = 'alert alert-success';
+              provisionAlert.textContent = `Empresa ${companyLabel} provisionada com sucesso!`;
+              provisionAlert.classList.remove('d-none');
+            }
+            renderProvisioningProgress(data);
+            provisionForm.reset();
+            if (provisionTenantSlugInput && companyName) {
+              provisionTenantSlugInput.value = generateSlug(companyName);
+            }
+            await carregarEmpresas();
+          } catch (erro) {
+            if (provisionAlert) {
+              provisionAlert.className = 'alert alert-danger';
+              provisionAlert.textContent = erro.message || 'Erro desconhecido durante o provisionamento.';
+              provisionAlert.classList.remove('d-none');
+            }
+          }
+        });
       }
 
       document.getElementById('btn-refresh').addEventListener('click', () => {

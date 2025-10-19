@@ -3,6 +3,7 @@ from __future__ import annotations
 from functools import wraps
 
 from flask import Blueprint, current_app, jsonify, render_template, request
+from redis import Redis
 from sqlalchemy import func, select
 
 from app import get_db_session
@@ -10,6 +11,7 @@ from app.config import settings
 from app.models import Company, PersonalizationConfig, Plan, Project, Subscription
 from app.services.auth import encode_jwt, verify_jwt
 from app.services.billing import BillingService
+from app.services.provisioner import ProvisionerService, ProvisioningPayload
 from app.services.tenancy import TenantContext, build_tenant_context
 
 bp = Blueprint("projects", __name__)
@@ -89,6 +91,34 @@ def require_panel_auth(func):
         return func(*args, **kwargs)
 
     return wrapper
+
+
+@bp.post("/api/tenants/provision")
+@require_panel_auth
+def provision_tenant():
+    payload = request.get_json(silent=True) or {}
+    try:
+        provisioning_payload = ProvisioningPayload.from_dict(payload)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    engine = getattr(current_app, "db_engine", None)
+    redis_client = getattr(current_app, "redis", None)
+    if engine is None:
+        return jsonify({"error": "database_engine_not_initialized"}), 503
+    if redis_client is None:
+        redis_client = Redis.from_url(settings.redis_url, decode_responses=True)
+
+    with get_db_session(current_app) as session:
+        service = ProvisionerService(session, engine, redis_client)
+        try:
+            result = service.provision(provisioning_payload)
+        except ValueError as exc:
+            message = str(exc)
+            status_code = 409 if message == "domain_in_use" else 400
+            return jsonify({"error": message}), status_code
+
+    return jsonify({"ok": True, **result}), 201
 
 
 @bp.get("/painel/config")

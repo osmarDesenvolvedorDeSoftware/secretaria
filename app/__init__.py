@@ -27,6 +27,7 @@ from .metrics import (
     queue_gauge,
     redis_memory_usage_gauge,
     task_latency_histogram,
+    tenant_worker_gauge,
     webhook_received_counter,
     whaticket_errors,
     whaticket_latency,
@@ -35,6 +36,7 @@ from .services.tenancy import (
     build_tenant_context,
     extract_domain_from_request,
     iter_companies,
+    namespaced_key,
     queue_name_for_company,
     resolve_company,
 )
@@ -182,6 +184,7 @@ def init_app() -> Flask:
 
     @app.route("/metrics")
     def metrics():
+        redis_client = getattr(app, "redis", None)
         try:
             companies = iter_companies(SessionLocal)
         except Exception:
@@ -200,6 +203,16 @@ def init_app() -> Flask:
             )
             dead_letter_queue_gauge.labels(company=label).set(dead_letter_size)
 
+            worker_count = 0
+            if redis_client is not None:
+                try:
+                    workers_key = namespaced_key(company.id, "workers")
+                    members = redis_client.smembers(workers_key)
+                    worker_count = len(members) if members else 0
+                except Exception:
+                    worker_count = 0
+            tenant_worker_gauge.labels(company=label).set(worker_count)
+
         # Garantir que métricas da fila padrão (company 0) também sejam expostas
         if "0" not in seen_companies:
             default_queue = getattr(app, "task_queue", None)
@@ -214,8 +227,8 @@ def init_app() -> Flask:
                     count_attr() if callable(count_attr) else int(count_attr or 0)
                 )
                 dead_letter_queue_gauge.labels(company="0").set(dead_letter_size)
+            tenant_worker_gauge.labels(company="0").set(0)
 
-        redis_client = getattr(app, "redis", None)
         if redis_client is not None:
             try:
                 info = redis_client.info("memory")  # type: ignore[union-attr]
