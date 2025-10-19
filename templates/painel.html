@@ -37,6 +37,43 @@
         </div>
       </div>
 
+      <div id="config-card" class="card shadow-sm mb-4 d-none">
+        <div class="card-body">
+          <h5 class="card-title">Configurações de Personalização</h5>
+          <div id="config-alert" class="alert alert-info d-none" role="alert"></div>
+          <form id="form-config" class="row g-3">
+            <div class="col-md-4">
+              <label for="config-tone" class="form-label">Tom de voz</label>
+              <select id="config-tone" class="form-select">
+                <option value="amigavel">Amigável</option>
+                <option value="formal">Formal</option>
+                <option value="informal">Informal</option>
+                <option value="tecnico">Técnico</option>
+              </select>
+            </div>
+            <div class="col-md-4">
+              <label for="config-limit" class="form-label">Limite de mensagens no contexto</label>
+              <input type="number" min="1" class="form-control" id="config-limit" value="5">
+            </div>
+            <div class="col-md-4 d-flex align-items-end">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="config-ai-enabled" checked>
+                <label class="form-check-label" for="config-ai-enabled">
+                  IA ativada
+                </label>
+              </div>
+            </div>
+            <div class="col-12">
+              <label for="config-phrases" class="form-label">Frases iniciais (uma por linha)</label>
+              <textarea class="form-control" id="config-phrases" rows="3" placeholder="Olá!\nComo posso ajudar?\nConta comigo!"></textarea>
+            </div>
+            <div class="col-12 d-flex justify-content-end">
+              <button type="submit" class="btn btn-success">Salvar ajustes</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
       <div id="lista" class="row g-3"></div>
     </div>
     <script>
@@ -45,6 +82,8 @@
       function setAuthToken(token) {
         authToken = token;
         const logoutButton = document.getElementById('btn-logout');
+        const configCard = document.getElementById('config-card');
+        const configAlert = document.getElementById('config-alert');
         if (authToken) {
           localStorage.setItem('panel_token', authToken);
           logoutButton.classList.remove('d-none');
@@ -53,6 +92,10 @@
           localStorage.removeItem('panel_token');
           logoutButton.classList.add('d-none');
           document.getElementById('login-card').classList.remove('d-none');
+          configCard.classList.add('d-none');
+          document.getElementById('form-config').reset();
+          configAlert.classList.add('d-none');
+          configAlert.textContent = '';
         }
       }
 
@@ -119,7 +162,49 @@
         }
       }
 
-      document.getElementById('btn-refresh').addEventListener('click', carregar);
+      async function carregarConfig() {
+        const configCard = document.getElementById('config-card');
+        const configAlert = document.getElementById('config-alert');
+        if (!ensureAuthentication()) {
+          configCard.classList.add('d-none');
+          return;
+        }
+
+        try {
+          const resposta = await fetch('/painel/config', {
+            headers: {
+              Authorization: `Bearer ${authToken}`,
+            },
+          });
+          if (resposta.status === 401) {
+            setAuthToken('');
+            throw new Error('Sessão expirada. Faça login novamente.');
+          }
+          if (!resposta.ok) {
+            throw new Error('Não foi possível carregar as configurações.');
+          }
+          const data = await resposta.json();
+          document.getElementById('config-tone').value = data.tone_of_voice || 'amigavel';
+          document.getElementById('config-limit').value = data.message_limit || 5;
+          document.getElementById('config-phrases').value = Array.isArray(data.opening_phrases)
+            ? data.opening_phrases.join('\n')
+            : '';
+          document.getElementById('config-ai-enabled').checked = Boolean(data.ai_enabled);
+          configAlert.classList.add('d-none');
+          configAlert.textContent = '';
+          configCard.classList.remove('d-none');
+        } catch (erro) {
+          configAlert.className = 'alert alert-warning';
+          configAlert.textContent = erro.message;
+          configAlert.classList.remove('d-none');
+          configCard.classList.remove('d-none');
+        }
+      }
+
+      document.getElementById('btn-refresh').addEventListener('click', () => {
+        carregar();
+        carregarConfig();
+      });
       document.getElementById('form-login').addEventListener('submit', async (event) => {
         event.preventDefault();
         const senha = document.getElementById('senha-painel').value.trim();
@@ -147,9 +232,60 @@
           setAuthToken(data.access_token);
           document.getElementById('senha-painel').value = '';
           await carregar();
+          await carregarConfig();
         } catch (erro) {
           alerta.textContent = erro.message;
           alerta.classList.remove('d-none');
+        }
+      });
+
+      document.getElementById('form-config').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        if (!ensureAuthentication()) {
+          return;
+        }
+        const configAlert = document.getElementById('config-alert');
+        configAlert.classList.add('d-none');
+        configAlert.textContent = '';
+        const tone = document.getElementById('config-tone').value.trim() || 'amigavel';
+        const limitValue = parseInt(document.getElementById('config-limit').value, 10);
+        const messageLimit = Number.isFinite(limitValue) && limitValue > 0 ? limitValue : 5;
+        const phrasesRaw = document.getElementById('config-phrases').value;
+        const openingPhrases = phrasesRaw
+          .split('\n')
+          .map((linha) => linha.trim())
+          .filter((linha) => linha.length > 0);
+        const aiEnabled = document.getElementById('config-ai-enabled').checked;
+
+        try {
+          const resposta = await fetch('/painel/config', {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${authToken}`,
+            },
+            body: JSON.stringify({
+              tone_of_voice: tone,
+              message_limit: messageLimit,
+              opening_phrases: openingPhrases,
+              ai_enabled: aiEnabled,
+            }),
+          });
+          if (resposta.status === 401) {
+            setAuthToken('');
+            throw new Error('Sessão expirada. Faça login novamente.');
+          }
+          if (!resposta.ok) {
+            throw new Error('Não foi possível salvar as configurações.');
+          }
+          await carregarConfig();
+          configAlert.className = 'alert alert-success';
+          configAlert.textContent = 'Configurações atualizadas com sucesso!';
+          configAlert.classList.remove('d-none');
+        } catch (erro) {
+          configAlert.className = 'alert alert-danger';
+          configAlert.textContent = erro.message;
+          configAlert.classList.remove('d-none');
         }
       });
 
@@ -162,6 +298,7 @@
 
       setAuthToken(authToken);
       carregar();
+      carregarConfig();
     </script>
   </body>
 </html>

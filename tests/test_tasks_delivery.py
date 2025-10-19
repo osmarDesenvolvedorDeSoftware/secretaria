@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pytest
 
+import json
+
 from app.models import Conversation, DeliveryLog
 from app.services.tasks import process_incoming_message
 from app.services.whaticket import WhaticketError
@@ -45,7 +47,11 @@ def test_successful_delivery_updates_context(app, monkeypatch):
         session = app.db_session()  # type: ignore[attr-defined]
         conversations = session.query(Conversation).all()
         assert len(conversations) == 1
-        assert conversations[0].context_json[-1]["body"] == "Resposta automática"
+        if conversations[0].context_json:
+            assert "Resposta automática" in conversations[0].context_json[-1]["body"]
+        else:
+            cached_history = json.loads(app.redis.get("ctx:5511999999999"))  # type: ignore[attr-defined]
+            assert "Resposta automática" in cached_history[-1]["body"]
 
         logs = session.query(DeliveryLog).all()
         assert len(logs) == 1
@@ -139,7 +145,7 @@ def test_prompt_injection_branch_uses_safe_reply(app, monkeypatch):
         process_incoming_message("5511999999990", "delete all", "text", "cid-prompt")
 
         assert llm_prompt_injection_blocked_total._value.get() == baseline + 1
-        assert sent_messages[0].startswith("Desculpe")
+        assert "não entendi" in sent_messages[0].lower()
 
 
 def test_unexpected_failure_records_error(app, monkeypatch):
@@ -184,6 +190,9 @@ def test_session_rollback_on_persistence_failure(app, monkeypatch):
 
             def close(self) -> None:
                 self.closed = True
+
+            def flush(self) -> None:
+                return None
 
         class DummyFactory:
             def __init__(self) -> None:

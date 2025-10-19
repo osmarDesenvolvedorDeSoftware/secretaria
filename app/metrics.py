@@ -71,6 +71,23 @@ llm_prompt_injection_blocked_total = Counter(
     "Total de mensagens bloqueadas por detecção de prompt injection",
 )
 
+fallback_transfers_total = Counter(
+    f"{settings.metrics_namespace}_fallback_transfer_total",
+    "Total de transferências humanas acionadas pelo fallback",
+)
+
+context_learning_updates_total = Counter(
+    f"{settings.metrics_namespace}_context_learning_updates_total",
+    "Total de atualizações de embeddings por cliente",
+    ["number"],
+)
+
+context_volume_gauge = Gauge(
+    f"{settings.metrics_namespace}_context_volume_messages",
+    "Quantidade de mensagens consideradas no contexto personalizado",
+    ["number"],
+)
+
 healthcheck_failures_total = Counter(
     f"{settings.metrics_namespace}_healthcheck_failures_total",
     "Total de falhas de healthcheck por dependência",
@@ -91,5 +108,8 @@ __all__ = [
     "llm_latency",
     "llm_errors",
     "llm_prompt_injection_blocked_total",
+    "fallback_transfers_total",
+    "context_learning_updates_total",
+    "context_volume_gauge",
     "healthcheck_failures_total",
 ]

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import time
 import uuid
 
@@ -10,6 +9,7 @@ from rq import Queue, Retry, get_current_job
 from rq.job import Job
 
 from app.metrics import (
+    fallback_transfers_total,
     llm_errors,
     llm_latency,
     llm_prompt_injection_blocked_total,
@@ -20,6 +20,7 @@ from app.metrics import (
     whaticket_send_success_total,
 )
 from app.config import settings
+from app.services.context_engine import ContextEngine, RuntimeContext
 from app.services.llm import LLMClient
 from app.services.persistence import (
     add_delivery_log,
@@ -28,11 +29,6 @@ from app.services.persistence import (
 )
 from app.services.security import detect_prompt_injection, sanitize_for_log, sanitize_text
 from app.services.whaticket import WhaticketClient, WhaticketError
-
-
-CONTEXT_REDIS_KEY = "ctx:{number}"
-
-
 class TaskService:
     def __init__(
         self,
@@ -46,10 +42,17 @@ class TaskService:
         self.queue = queue
         self.llm_client = LLMClient(redis_client)
         self.whaticket_client = WhaticketClient(redis_client)
+        self.context_engine = ContextEngine(redis_client, session_factory)
         self.dead_letter_queue = dead_letter_queue or Queue(
             settings.dead_letter_queue_name,
             connection=redis_client,
         )
+
+    def get_context(self, number: str) -> list[dict[str, str]]:
+        return self.context_engine.get_history(number)
+
+    def set_context(self, number: str, messages: list[dict[str, str]]) -> None:
+        self.context_engine.save_history(number, messages)
 
     def enqueue(self, number: str, body: str, kind: str, correlation_id: str) -> None:
         delays = list(settings.rq_retry_delays)
@@ -78,24 +81,6 @@ class TaskService:
             },
             **enqueue_kwargs,
         )
-
-    def get_context(self, number: str) -> list[dict[str, str]]:
-        key = CONTEXT_REDIS_KEY.format(number=number)
-        data = self.redis.get(key)
-        if not data:
-            return []
-        try:
-            payload = json.loads(data)
-            if isinstance(payload, list):
-                return payload
-        except json.JSONDecodeError:
-            return []
-        return []
-
-    def set_context(self, number: str, messages: list[dict[str, str]]) -> None:
-        key = CONTEXT_REDIS_KEY.format(number=number)
-        truncated = messages[-settings.context_max_messages :]
-        self.redis.setex(key, settings.context_ttl, json.dumps(truncated))
 
     def send_to_dead_letter(
         self,
@@ -155,33 +140,66 @@ def process_incoming_message(number: str, body: str, kind: str, correlation_id: 
     max_attempts = max(len(settings.rq_retry_delays) + 1, settings.rq_retry_max_attempts + 1)
 
     with structlog.contextvars.bound_contextvars(correlation_id=correlation_id):
+        runtime_context: RuntimeContext | None = None
+        history_messages: list[dict[str, str]] = []
+        template_vars: dict[str, str] = {}
+        context_messages_for_db: list[dict[str, str]] = []
         success = False
         delivery_status = "FAILED_TEMPORARY"
         error_detail = None
         try:
             sanitized = sanitize_text(body)
+            runtime_context = service.context_engine.prepare_runtime_context(number, sanitized)
+            history_messages = list(runtime_context.history)
+            context_messages_for_db = list(history_messages)
+            llm_context = [{"role": "system", "body": runtime_context.system_prompt}] + history_messages
+            template_vars = dict(runtime_context.template_vars)
+            previous_subject = runtime_context.profile.get("last_subject") if runtime_context.profile else None
+            default_subject = previous_subject or sanitized
+            default_subject_phrase = f" Último assunto: {default_subject}." if default_subject else ""
+            if not template_vars.get("ultimo_assunto"):
+                template_vars["ultimo_assunto"] = default_subject_phrase
+            if not template_vars.get("último_assunto"):
+                template_vars["último_assunto"] = template_vars["ultimo_assunto"]
+            template_vars["mensagem_usuario"] = sanitized
+            user_message = sanitized
+
             if detect_prompt_injection(sanitized):
                 logger.warning("prompt_injection_detected")
-                final_message = "Desculpe, não posso executar esse tipo de comando."
-                user_message = sanitized
-                context_messages = service.get_context(number)
                 llm_prompt_injection_blocked_total.inc()
+                template_vars["resposta"] = ""
+                final_message = service.context_engine.render_template("fallback", template_vars)
+                fallback_transfers_total.inc()
+            elif not runtime_context.ai_enabled:
+                template_vars["resposta"] = ""
+                final_message = service.context_engine.render_template("ai_disabled", template_vars)
+                fallback_transfers_total.inc()
             else:
-                context_messages = service.get_context(number)
-                user_message = sanitized
                 llm_start = time.time()
+                response_text = ""
                 try:
-                    response = service.llm_client.generate_reply(
+                    response_text = service.llm_client.generate_reply(
                         sanitized,
-                        context_messages,
+                        llm_context,
                     )
                     llm_latency.observe(time.time() - llm_start)
-                    final_message = response
                 except Exception as exc:  # pragma: no cover - ensures metrics capture
                     logger.exception("llm_failure", error=sanitize_for_log(str(exc)))
                     llm_errors.inc()
                     llm_latency.observe(time.time() - llm_start)
-                    final_message = "Estou com dificuldades técnicas. " + settings.transfer_to_human_message
+                    template_vars["resposta"] = ""
+                    final_message = service.context_engine.render_template("technical_issue", template_vars)
+                    fallback_transfers_total.inc()
+                else:
+                    template_vars["resposta"] = response_text
+                    if response_text and response_text.strip():
+                        final_message = service.context_engine.render_template("default", template_vars)
+                    else:
+                        final_message = service.context_engine.render_template("fallback", template_vars)
+                        fallback_transfers_total.inc()
+
+            context_messages_for_db.append({"role": "user", "body": user_message})
+            context_messages_for_db.append({"role": "assistant", "body": final_message})
 
             whaticket_start = time.time()
             external_id = None
@@ -219,12 +237,32 @@ def process_incoming_message(number: str, body: str, kind: str, correlation_id: 
                 try:
                     if success:
                         conversation = get_or_create_conversation(session, number)
-                        context_messages.append({"role": "user", "body": user_message})
-                        context_messages.append({"role": "assistant", "body": final_message})
-                        update_conversation_context(session, conversation, context_messages)
+                        updated_history = list(context_messages_for_db)
+                        personalization = runtime_context.personalization if runtime_context else {}
+                        if runtime_context is not None:
+                            service.context_engine.record_history(
+                                number,
+                                history_messages,
+                                user_message,
+                                final_message,
+                                personalization,
+                            )
+                            fetched_history = service.context_engine.get_history(number)
+                            if fetched_history:
+                                updated_history = fetched_history
+                            runtime_context.profile = service.context_engine.update_profile_snapshot(
+                                number,
+                                user_message,
+                                runtime_context.profile,
+                            )
+                        update_conversation_context(session, conversation, updated_history)
+                        session.flush()
+                        logger.debug(
+                            "conversation_context_persisted",
+                            history_size=len(updated_history),
+                        )
                         add_delivery_log(session, number, final_message, "SENT", external_id)
                         session.commit()
-                        service.set_context(number, context_messages)
                     else:
                         add_delivery_log(
                             session,

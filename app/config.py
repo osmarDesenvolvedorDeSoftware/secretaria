@@ -42,6 +42,8 @@ class Config:
     whaticket_jwt_email: Optional[str] = os.getenv("WHATICKET_JWT_EMAIL")
     whaticket_jwt_password: Optional[str] = os.getenv("WHATICKET_JWT_PASSWORD")
     gemini_api_key: str = os.getenv("GEMINI_API_KEY", "")
+    openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
+    embedding_provider: str = os.getenv("EMBEDDING_PROVIDER", "gemini")
     redis_url: str = os.getenv("REDIS_URL", "redis://redis:6379/0")
     database_url: str = os.getenv("DATABASE_URL", "postgresql+psycopg2://postgres:postgres@postgres:5432/postgres")
     context_max_messages: int = _int("CONTEXT_MAX_MESSAGES", 5)
