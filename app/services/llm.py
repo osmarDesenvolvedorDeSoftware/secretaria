@@ -9,7 +9,7 @@ import structlog
 from redis import Redis
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_random_exponential
 
-from app.metrics import llm_errors, llm_latency, token_usage_total
+from app.metrics import llm_errors, llm_error_rate_gauge, llm_latency, token_usage_total
 from app.config import settings
 from app.services.security import detect_prompt_injection, sanitize_for_log
 from app.services.tenancy import TenantContext
@@ -66,6 +66,21 @@ class LLMClient:
         self.logger = structlog.get_logger().bind(service="gemini", company=self.company_label)
         self.circuit_breaker = CircuitBreaker(redis_client, tenant)
 
+    def _update_error_rate(self, success: bool) -> None:
+        key = self.tenant.namespaced_key("metrics", "llm", "error_rate")
+        try:
+            field = "success" if success else "failure"
+            self.redis.hincrby(key, field, 1)
+            data = self.redis.hgetall(key) or {}
+            success_count = int(data.get("success", 0) or 0)
+            failure_count = int(data.get("failure", 0) or 0)
+            total = success_count + failure_count
+            if total > 0:
+                rate = failure_count / total
+                llm_error_rate_gauge.labels(company=self.company_label).set(rate)
+        except Exception:
+            pass
+
     @retry(
         stop=stop_after_attempt(settings.llm_retry_attempts),
         wait=wait_random_exponential(multiplier=1, max=10),
@@ -115,6 +130,7 @@ class LLMClient:
             if not text_output:
                 raise LLMError("Conteúdo ausente na resposta")
             self.circuit_breaker.record_success()
+            self._update_error_rate(True)
             clean_response = text_output.strip()
             if clean_response:
                 token_usage_total.labels(company=self.company_label, direction="outbound").inc(
@@ -128,6 +144,7 @@ class LLMClient:
             )
             self.circuit_breaker.record_failure()
             llm_errors.labels(company=self.company_label).inc()
+            self._update_error_rate(False)
             raise LLMError("Falha ao chamar LLM")
         finally:
             duration = time.time() - start

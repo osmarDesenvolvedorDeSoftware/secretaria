@@ -6,7 +6,7 @@
 - Confiabilidade: testes automatizados (pytest, métricas, painel, contexto) executados com sucesso; lint garante ausência de imports redundantes e dependências obsoletas.
 - Próximos marcos:
   - **v1.1** – hardening de segurança (rotações automáticas de segredos, rate limiting por cliente, testes de carga contínuos).
-  - **v2.0** – expansão multicanal (e-mail/SMS), workflows dinâmicos e painel com analytics avançado em tempo real.
+  - **v2.1** – multicanal (e-mail/SMS), workflows dinâmicos e automação de playbooks por tenant.
 
 ## Release v1.1 – Concluído
 
@@ -31,27 +31,38 @@
   - Integração real com provedor DNS/ACME em lugar do mock do deploy.
   - Testes end-to-end cobrindo o fluxo de provisionamento e painel atualizado.
 
-## Release v1.3 – Em validação
+## Release v1.3 – Concluído
 
-- Status: ⚙️ Em validação – foco em analytics e faturamento em tempo real.
-- Entregas concluídas nesta versão:
+- Status: ✅ Disponível – analytics e faturamento em tempo real implantados.
+- Entregas concluídas:
   - Serviço `AnalyticsService` com agregação diária/semanal persistida em `analytics_reports`.
   - Integração do `BillingService` com atualização de uso/custo em tempo real e alertas (80%/100%) por empresa.
   - Nova aba “Analytics e Consumo” no painel com gráficos Chart.js, resumo financeiro, alertas e exportação CSV/PDF.
   - Endpoints `/api/analytics/summary`, `/api/analytics/history` e `/api/analytics/export` protegidos por autenticação do painel.
-- Pendências para GA:
+- Pendências observadas:
   - Webhook de alerta conectado ao provedor definitivo de notificações.
   - RBAC do painel para limitar acesso a analytics por perfil.
   - Testes end-to-end cobrindo exportação e alertas de limites.
+
+## Release v2.0 – Concluído
+
+- Status: ✅ Concluído – IA de negócios, upsell automático, A/B testing e compliance LGPD disponíveis por tenant.
+- Entregas principais:
+  - `RecommendationService` com cálculo de churn, sugestões de upgrade, “next best action” e gatilhos de webhook por empresa.
+  - `ABTestService`, modelos `ABTest`/`ABEvent` e rotas `/api/abtests/*` para experimentos epsilon-greedy com métricas agregadas.
+  - Ingestão de feedback (`/api/feedback/ingest`), ajustes no `ContextEngine` e métricas de NPS/quick-replies em Prometheus.
+  - Rotas de compliance (`/api/compliance/*`) com exportação CSV/JSON, exclusão auditada e políticas de retenção configuráveis.
+  - Novo `AuditLog`, middleware de auditoria e painel “IA de Negócios” com gráficos, testes A/B e console LGPD.
+  - SLOs adicionais (`webhook_latency_seconds`, `whaticket_delivery_success_ratio`, `llm_error_rate`) e scripts de DR (`make backup`, `make restore`).
 
 | Componente | Status | Observações |
 | --- | --- | --- |
 | Backend Flask (rotas/serviços) | ⚙️ Em validação | Webhook e painel multiempresa concluídos; pendem testes extras para billing e limites por tenant. |
 | Fila e Workers RQ | ⚙️ Em validação | Provisionamento automático cria filas isoladas e `spawn_worker.py` registra estado; falta autoescala e orquestração automática pós-provisionamento. |
 | Persistência (PostgreSQL + Redis) | ⚙️ Em validação | Esquema multiempresa migrado; monitoramento de crescimento Redis por tenant precisa de runbooks. |
-| Segurança e Compliance | ⚠️ Parcial | HMAC, rate limiting e mitigação de prompt injection presentes; falta auditoria de acesso, rotação de segredos e proteção DDoS avançada. |
-| Observabilidade & Operações | ✅ Completo | Prometheus integrado, healthcheck profundo e logs estruturados com correlação operacional. |
-| Painel / Frontend interno | ⚙️ Em validação | Painel ganhou onboarding "Nova Empresa" e monitoramento de domínio/SSL; pendente RBAC avançado e testes end-to-end. |
+| Segurança e Compliance | ⚙️ Em evolução | HMAC, rate limiting, prompt injection e auditoria (`AuditLog`) ativos; falta rotação contínua de segredos e mitigação DDoS avançada. |
+| Observabilidade & Operações | ✅ Completo | Prometheus integrado, healthcheck profundo e novos gauges de SLO para webhook/LLM/Whaticket. |
+| Painel / Frontend interno | ⚙️ Em validação | Painel ganhou onboarding "Nova Empresa", aba Analytics e aba IA de Negócios; pendente RBAC avançado e testes end-to-end. |
 | Integrações Externas (LLM & Whaticket) | ⚠️ Parcial | Retries, circuit breaker e classificação de erros implementados; dependência de tokens fixos e falta de fallback multicanal. |
 
 ## Produção Controlada
@@ -79,9 +90,9 @@
 2. ✅ **Gestão de Segredos**: integrar vault/secret manager, estabelecer rotação periódica e segregação por ambiente (staging/prod) para tokens Whaticket e credenciais LLM.
 3. ✅ **Governança Redis**: definir TTLs claros para contexto e rate limiting, adicionar métricas de uso de memória e alertas de saturação.
 4. ✅ **Automação de Migrações**: usar Alembic em pipeline CI/CD com validação pré-deploy e rollback automatizado em caso de falha.
-5. ✅ **Segurança do Painel**: implementar autenticação (SSO ou JWT interno), controle de permissão e revisão de logs de acesso.
-6. ✅ **Resiliência de Integrações**: adicionar fila de DLQ e mecanismo de reprocessamento manual para mensagens não entregues; registrar métricas por cliente/campanha.
-7. **Automação do Worker por Tenant**: orquestrar a execução do `scripts/spawn_worker.py` logo após o provisionamento e adicionar healthcheck dedicado.
+5. ✅ **Segurança do Painel**: autenticação JWT e auditoria centralizada no painel.
+6. ✅ **Resiliência de Integrações**: fila de DLQ com reprocessamento manual e métricas por tenant.
+7. **Automação do Worker por Tenant**: orquestrar a execução do `scripts/spawn_worker.py` pós-provisionamento e adicionar healthcheck dedicado.
 8. **Integração DNS/SSL real**: conectar `scripts/deploy.sh` a um provedor (Cloudflare API ou Certbot) e validar certificados automaticamente.
 9. **Testes ponta-a-ponta do provisionamento**: cobrir a nova jornada “Nova Empresa” com Playwright/Cypress e validar geração de credenciais.
 10. **Validação de Carga**: executar testes de carga sobre o endpoint /webhook para calibrar timeouts, limites por IP/número e dimensionamento do RQ.

@@ -41,6 +41,21 @@ class Company(Base):
         back_populates="company",
         cascade="all, delete-orphan",
     )
+    ab_tests = relationship(
+        "ABTest",
+        back_populates="company",
+        cascade="all, delete-orphan",
+    )
+    feedback_events = relationship(
+        "FeedbackEvent",
+        back_populates="company",
+        cascade="all, delete-orphan",
+    )
+    audit_logs = relationship(
+        "AuditLog",
+        back_populates="company",
+        cascade="all, delete-orphan",
+    )
 
     def __repr__(self) -> str:  # pragma: no cover - utilitário de debug
         return f"<Company id={self.id} name={self.name!r} domain={self.domain!r}>"

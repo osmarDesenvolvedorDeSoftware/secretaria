@@ -118,6 +118,7 @@ class RuntimeContext:
     template_name: str = "default"
     tone_profile: dict[str, Any] = field(default_factory=dict)
     feedback: str | None = None
+    feedback_summary: dict[str, Any] = field(default_factory=dict)
 
 
 class EmbeddingClient:
@@ -347,6 +348,25 @@ class ContextEngine:
                 ).set(positive / total)
         except Exception:
             LOGGER.debug("feedback_metrics_update_failed", number=number)
+
+    def _load_feedback_summary(self, number: str) -> dict[str, Any]:
+        key = self.tenant.namespaced_key("feedback", "number", number)
+        summary: dict[str, Any] = {"positive": 0, "negative": 0, "nps": 0.0}
+        try:
+            data = self.redis.hgetall(key) or {}
+        except Exception:
+            data = {}
+        if data:
+            positive = int(data.get("thumbs_up", 0) or 0)
+            negative = int(data.get("thumbs_down", 0) or 0)
+            total = positive + negative
+            ratio_positive = positive / total if total else 0.0
+            summary.update({
+                "positive": positive,
+                "negative": negative,
+                "positive_ratio": round(ratio_positive, 4),
+            })
+        return summary
 
     def _register_intention_metric(self, intention: str) -> None:
         try:
@@ -617,6 +637,7 @@ class ContextEngine:
         sentiment_label, sentiment_score = self._analyze_sentiment(user_message)
         intention = self._detect_intention(user_message, trimmed_history)
         feedback = self._detect_feedback(user_message)
+        feedback_summary = self._load_feedback_summary(number)
 
         self._update_sentiment_metrics(number, sentiment_score)
         self._update_feedback_metrics(number, feedback)
@@ -630,6 +651,12 @@ class ContextEngine:
         if isinstance(phrases, list) and phrases:
             saudacao = phrases[0]
         tone_profile = self._build_tone_profile(config, sentiment_label)
+        positive_ratio = float(feedback_summary.get("positive_ratio") or 0.0)
+        if positive_ratio <= 0.4 and (feedback_summary.get("positive") or 0) + (feedback_summary.get("negative") or 0) >= 3:
+            tone_profile["humor_enabled"] = False
+            tone_profile["empathy_level"] = min(100, tone_profile.get("empathy_level", 70) + 10)
+        elif positive_ratio >= 0.7:
+            tone_profile["humor_enabled"] = True
         tone = tone_profile.get("tone", "amigavel")
 
         frequent_topics = profile.get("frequent_topics") or []
@@ -729,6 +756,7 @@ class ContextEngine:
             template_name=self._select_template_name(intention, sentiment_label),
             tone_profile=tone_profile,
             feedback=feedback,
+            feedback_summary=feedback_summary,
         )
 
     def build_llm_context(self, runtime_context: RuntimeContext) -> list[dict[str, str]]:
