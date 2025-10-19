@@ -1,3 +1,4 @@
+from .analytics_report import AnalyticsReport
 from .company import Company
 from .conversation import Conversation
 from .customer_context import CustomerContext
@@ -8,6 +9,7 @@ from .project import Project
 from .subscription import Subscription
 
 __all__ = [
+    "AnalyticsReport",
     "Company",
     "Conversation",
     "CustomerContext",

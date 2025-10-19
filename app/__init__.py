@@ -32,6 +32,8 @@ from .metrics import (
     whaticket_errors,
     whaticket_latency,
 )
+from .services.analytics_service import AnalyticsService
+from .services.billing import BillingService
 from .services.tenancy import (
     build_tenant_context,
     extract_domain_from_request,
@@ -125,6 +127,11 @@ def init_app() -> Flask:
     app.get_dead_letter_queue = get_dead_letter_queue  # type: ignore[attr-defined]
     app.task_queue = get_task_queue(0)  # type: ignore[attr-defined]
     app.dead_letter_queue = get_dead_letter_queue(0)  # type: ignore[attr-defined]
+
+    analytics_service = AnalyticsService(SessionLocal, redis_client)
+    billing_service = BillingService(SessionLocal, redis_client, analytics_service)
+    app.analytics_service = analytics_service  # type: ignore[attr-defined]
+    app.billing_service = billing_service  # type: ignore[attr-defined]
 
     @app.teardown_appcontext
     def remove_session(exception: Exception | None) -> None:
@@ -255,10 +262,12 @@ def init_app() -> Flask:
             active_workers_gauge.set(0)
         return app.response_class(generate_latest(), mimetype=CONTENT_TYPE_LATEST)
 
+    from app.routes.analytics import analytics_bp
     from app.routes.projects import bp as projects_bp
 
     app.register_blueprint(health_bp)
     app.register_blueprint(webhook_bp)
+    app.register_blueprint(analytics_bp)
     app.register_blueprint(projects_bp)
 
     return app

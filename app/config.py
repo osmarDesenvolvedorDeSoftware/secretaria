@@ -65,12 +65,18 @@ class Config:
     rq_retry_max_attempts: int = _int("RQ_RETRY_MAX_ATTEMPTS", 5)
     metrics_namespace: str = os.getenv("METRICS_NAMESPACE", "secretaria")
     enable_jwt_login: bool = field(default_factory=lambda: bool(os.getenv("WHATICKET_JWT_EMAIL") and os.getenv("WHATICKET_JWT_PASSWORD")))
-    transfer_to_human_message: str = os.getenv("TRANSFER_TO_HUMAN_MESSAGE", "Estamos encaminhando seu atendimento para um agente humano.")
+    transfer_to_human_message: str = os.getenv(
+        "TRANSFER_TO_HUMAN_MESSAGE",
+        "Estamos encaminhando seu atendimento para um agente humano.",
+    )
     redis_memory_warning_bytes: int = _int("REDIS_MEMORY_WARNING_BYTES", 512 * 1024 * 1024)
     redis_memory_critical_bytes: int = _int("REDIS_MEMORY_CRITICAL_BYTES", 768 * 1024 * 1024)
     panel_password: str = os.getenv("PANEL_PASSWORD", "")
     panel_jwt_secret: str = os.getenv("PANEL_JWT_SECRET", "change-me")
     panel_token_ttl_seconds: int = _int("PANEL_TOKEN_TTL_SECONDS", 3600)
+    billing_cost_per_message: float = _float("BILLING_COST_PER_MESSAGE", 0.02)
+    billing_cost_per_thousand_tokens: float = _float("BILLING_COST_PER_THOUSAND_TOKENS", 0.35)
+    billing_alert_webhook_url: Optional[str] = os.getenv("BILLING_ALERT_WEBHOOK_URL")
     context_ttl: int = field(init=False)
     context_ttl_seconds: int = field(init=False)
     rate_limit_ttl: int = field(init=False)

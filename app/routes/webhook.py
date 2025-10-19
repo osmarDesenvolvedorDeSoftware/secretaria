@@ -8,6 +8,7 @@ from pydantic import BaseModel, ValidationError, field_validator, model_validato
 from rq import Queue
 
 from app.metrics import webhook_received_counter
+from app.services.billing import BillingService
 from app.services.payload import extract_number, extract_text_and_kind
 from app.services.rate_limit import RateLimiter
 from app.services.security import sanitize_text, validate_hmac_signature, validate_webhook_token
@@ -94,12 +95,23 @@ def whaticket_webhook() -> Response:
 
     queue: Queue = current_app.get_task_queue(tenant.company_id)  # type: ignore[attr-defined]
     dead_letter_queue: Queue = current_app.get_dead_letter_queue(tenant.company_id)  # type: ignore[attr-defined]
+    analytics_service = getattr(current_app, "analytics_service", None)
+    billing_service = getattr(current_app, "billing_service", None)
+    if billing_service is None:
+        billing_service = BillingService(
+            current_app.db_session,
+            current_app.redis,
+            analytics_service,
+        )
+        current_app.billing_service = billing_service  # type: ignore[attr-defined]
     service = TaskService(
         current_app.redis,
         current_app.db_session,
         tenant,
         queue,
         dead_letter_queue,
+        billing_service=billing_service,
+        analytics_service=analytics_service,
     )
 
     correlation_id = (

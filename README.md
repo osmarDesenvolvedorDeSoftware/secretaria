@@ -1,6 +1,6 @@
 # Secretaria Virtual Whaticket
 
-[![Release](https://img.shields.io/badge/version-v1.2-blue.svg)](docs/release_v1.2.md)
+[![Release](https://img.shields.io/badge/version-v1.3-blue.svg)](docs/release_v1.3.md)
 
 Arquitetura pronta para produção para uma secretária virtual integrada ao Whaticket com Flask, Redis, RQ e PostgreSQL.
 
@@ -9,17 +9,18 @@ Arquitetura pronta para produção para uma secretária virtual integrada ao Wha
 - 📄 [Documentação de release v1.0](docs/release_v1.0.md)
 - 📄 [Documentação de release v1.1](docs/release_v1.1.md)
 - 📄 [Documentação de release v1.2](docs/release_v1.2.md)
+- 📄 [Documentação de release v1.3](docs/release_v1.3.md)
 
 * **Multi-tenancy completo** com isolamento por empresa em banco, Redis, filas RQ e JWT multiempresa.
 * **Provisionamento automático** via `/api/tenants/provision` com criação de planos, assinaturas, schemas e redis dedicados.
-* **Gestão de planos e billing** com modelos `Plan`/`Subscription` e `BillingService` com webhooks.
+* **Gestão de planos e billing** com modelos `Plan`/`Subscription`, uso em tempo real e webhooks configuráveis.
 * **Webhook seguro** com validação HMAC (`X-Signature`) e token opcional (`X-Webhook-Token`).
 * **Persistência** de conversas e logs de entrega em PostgreSQL (SQLAlchemy + Alembic).
 * **Memória de curto prazo** e **rate limiting** via Redis com quotas por tenant.
 * **Fila assíncrona** com RQ para chamadas ao LLM e envio ao Whaticket.
 * **Integração Whaticket** com token estático ou login JWT opcional com cache em Redis.
 * **Cliente Gemini** com retries, timeout e circuit breaker.
-* **Observabilidade** com logs estruturados (structlog) e métricas Prometheus em `/metrics` segmentadas por empresa (incluindo workers por tenant).
+* **Observabilidade** com logs estruturados (structlog), métricas Prometheus e dashboards de consumo e custos por empresa.
 * **Segurança** com sanitização, proteção contra prompt-injection e CORS desabilitado no webhook.
 * **Testes** com pytest + cobertura e ambiente Docker pronto.
 
@@ -42,6 +43,13 @@ Arquitetura pronta para produção para uma secretária virtual integrada ao Wha
 2. Registre empresas com domínio único e vincule um plano ativo.
 3. Configure o webhook de pagamento no provedor (ex.: Stripe, Mercado Pago ou manual) apontando para `/webhook/billing` com o header `X-Company-Domain`.
 4. Garanta que clientes externos enviem `X-Company-Domain` ou incluam `company_id` no JWT para roteamento correto.
+
+### Analytics e Faturamento em Tempo Real
+
+1. A nova aba **Analytics e Consumo** do painel consolida métricas diárias e semanais (mensagens, tokens, tempo médio de resposta e custo estimado) por empresa.
+2. O backend agrega o uso em tempo real, calcula o custo incremental com base em `BILLING_COST_PER_MESSAGE` e `BILLING_COST_PER_THOUSAND_TOKENS` e dispara alertas quando 80% e 100% do plano são atingidos.
+3. Utilize os endpoints protegidos `/api/analytics/summary?company_id=...` e `/api/analytics/history?period=week|month&company_id=...` para integrar com outras ferramentas.
+4. Gere relatórios CSV ou PDF diretamente pelo painel ou via CLI com `make report COMPANY_ID=<id> FORMAT=csv|pdf`.
 
 ### Provisionamento automático de tenants
 

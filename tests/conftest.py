@@ -21,6 +21,7 @@ class DummyRedis:
         self.zsets: dict[str, list[float]] = {}
         self.sets: dict[str, set[str]] = {}
         self.hashes: dict[str, dict[str, Any]] = {}
+        self.lists: dict[str, list[Any]] = {}
         self.expiry: dict[str, int] = {}
 
     @staticmethod
@@ -73,6 +74,7 @@ class DummyRedis:
         self.storage.pop(key, None)
         self.hashes.pop(key, None)
         self.sets.pop(key, None)
+        self.lists.pop(key, None)
         self.expiry.pop(key, None)
 
     def llen(self, key: str) -> int:
@@ -101,12 +103,12 @@ class DummyRedis:
     def ttl(self, key: str):
         if key in self.expiry:
             return self.expiry[key]
-        if key in self.hashes or key in self.sets or key in self.storage:
+        if key in self.hashes or key in self.sets or key in self.storage or key in self.lists:
             return 60
         return -2
 
     def exists(self, key: str) -> bool:
-        return key in self.storage or key in self.hashes or key in self.sets
+        return key in self.storage or key in self.hashes or key in self.sets or key in self.lists
 
     def smembers(self, key: str):
         return set(self.sets.get(key, set()))
@@ -128,6 +130,34 @@ class DummyRedis:
         current += amount
         data[field] = current
         return current
+
+    def hincrbyfloat(self, key: str, field: str, amount: float = 0.0):
+        data = self.hashes.setdefault(key, {})
+        current = float(data.get(field, 0))
+        current += amount
+        data[field] = current
+        return current
+
+    def lpush(self, key: str, *values: Any):
+        lst = self.lists.setdefault(key, [])
+        for value in values:
+            lst.insert(0, value)
+        return len(lst)
+
+    def ltrim(self, key: str, start: int, end: int):
+        lst = self.lists.get(key)
+        if lst is None:
+            return True
+        if end == -1 or end >= len(lst):
+            end = len(lst) - 1
+        self.lists[key] = lst[start : end + 1]
+        return True
+
+    def lrange(self, key: str, start: int, end: int):
+        lst = self.lists.get(key, [])
+        if end == -1 or end >= len(lst):
+            end = len(lst) - 1
+        return lst[start : end + 1]
 
 
 class DummyQueue:
@@ -168,6 +198,10 @@ def app(monkeypatch) -> Generator[Flask, None, None]:
     config_settings.rate_limit_ttl_seconds = 60
     test_app = init_app()
     test_app.redis = DummyRedis()  # type: ignore[attr-defined]
+    if getattr(test_app, 'analytics_service', None):
+        test_app.analytics_service.redis = test_app.redis  # type: ignore[attr-defined]
+    if getattr(test_app, 'billing_service', None):
+        test_app.billing_service.redis = test_app.redis  # type: ignore[attr-defined]
     test_app.task_queue = DummyQueue()  # type: ignore[attr-defined]
     Base.metadata.create_all(test_app.db_engine)  # type: ignore[attr-defined]
     with test_app.app_context():

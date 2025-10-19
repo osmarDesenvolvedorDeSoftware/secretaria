@@ -17,19 +17,32 @@
   - Painel administrativo atualizado com `/painel/empresas`, dashboard de consumo e métricas por empresa.
   - Prometheus/Grafana expandidos com labels `company_id` para mensagens, tokens e filas.
 
-## Release v1.2 – Em validação
+## Release v1.2 – Concluído
 
-- Status: ⚙️ Nova – foco em auto-provisionamento completo e isolamento operacional.
+- Status: ✅ Concluído – auto-provisionamento completo e isolamento operacional em produção controlada.
 - Entregas concluídas nesta versão:
   - Endpoint `/api/tenants/provision` criando plano, empresa, assinatura e schema PostgreSQL `tenant_<id>` automaticamente.
   - Redis e filas RQ isoladas por tenant com metadados persistidos (redis://…/tenant_{id} e fila `default:company_{id}`).
   - Script `scripts/spawn_worker.py` para spawn e registro de workers dedicados com monitoramento no `/metrics`.
   - `scripts/deploy.sh` ampliado para provisionar subdomínios `chat.<tenant>.<domínio>` e `api.<tenant>.<domínio>` com status de SSL.
   - Painel com fluxo “Nova Empresa”, acompanhamento de provisionamento (banco, fila, domínio, worker) e token inicial exibido.
-- Pendências para GA:
+- Pendências acompanhadas como melhorias contínuas:
   - Automatizar disparo do worker pós-provisionamento (hook ou orquestrador).
   - Integração real com provedor DNS/ACME em lugar do mock do deploy.
   - Testes end-to-end cobrindo o fluxo de provisionamento e painel atualizado.
+
+## Release v1.3 – Em validação
+
+- Status: ⚙️ Em validação – foco em analytics e faturamento em tempo real.
+- Entregas concluídas nesta versão:
+  - Serviço `AnalyticsService` com agregação diária/semanal persistida em `analytics_reports`.
+  - Integração do `BillingService` com atualização de uso/custo em tempo real e alertas (80%/100%) por empresa.
+  - Nova aba “Analytics e Consumo” no painel com gráficos Chart.js, resumo financeiro, alertas e exportação CSV/PDF.
+  - Endpoints `/api/analytics/summary`, `/api/analytics/history` e `/api/analytics/export` protegidos por autenticação do painel.
+- Pendências para GA:
+  - Webhook de alerta conectado ao provedor definitivo de notificações.
+  - RBAC do painel para limitar acesso a analytics por perfil.
+  - Testes end-to-end cobrindo exportação e alertas de limites.
 
 | Componente | Status | Observações |
 | --- | --- | --- |

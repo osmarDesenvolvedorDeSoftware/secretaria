@@ -1,6 +1,8 @@
-.PHONY: dev migrate upgrade worker test up down install revision ci-migrate
+.PHONY: dev migrate upgrade worker test up down install revision ci-migrate report
 
 export FLASK_APP=run.py
+
+FORMAT ?= csv
 
 install:
         python3.11 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt
@@ -33,3 +35,10 @@ test:
 
 ci-migrate:
         alembic upgrade head || alembic downgrade -1
+
+report:
+	@if [ -z "$(COMPANY_ID)" ]; then \
+		echo "Uso: make report COMPANY_ID=<id> [FORMAT=csv|pdf]"; \
+		exit 1; \
+	fi
+	python -m scripts.export_report --company-id $(COMPANY_ID) --format $(FORMAT)
