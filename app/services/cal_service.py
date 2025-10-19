@@ -18,7 +18,7 @@ from app.metrics import (
     appointments_total,
 )
 from app.models import Appointment, Company
-from app.services import no_show_service, reminder_service
+from app.services import followup_service, no_show_service, reminder_service
 from app.services.audit import AuditService
 
 
@@ -231,6 +231,15 @@ def criar_agendamento(
             no_show_service.agendar_verificacao_no_show(appointment.id, check_time)
         except Exception as exc:  # pragma: no cover - scheduling failures shouldn't break flow
             LOGGER.warning("schedule_no_show_failed", error=str(exc), appointment_id=appointment.id)
+        if appointment.followup_sent_at is None and appointment.followup_next_scheduled is None:
+            try:
+                followup_service.agendar_followup(appointment.id)
+            except Exception as exc:  # pragma: no cover - scheduling failures shouldn't break flow
+                LOGGER.warning(
+                    "schedule_followup_failed",
+                    error=str(exc),
+                    appointment_id=appointment.id,
+                )
 
         appointments_confirmed_total.labels(company=str(company.id)).inc()
 
@@ -355,6 +364,19 @@ def sincronizar_webhook(payload: dict[str, Any]) -> None:
 
         if status == "cancelled":
             appointments_cancelled_total.labels(company=str(company.id)).inc()
+        elif (
+            status != "rescheduled"
+            and appointment.followup_sent_at is None
+            and appointment.followup_next_scheduled is None
+        ):
+            try:
+                followup_service.agendar_followup(appointment.id)
+            except Exception as exc:  # pragma: no cover - scheduling failures shouldn't break flow
+                LOGGER.warning(
+                    "schedule_followup_failed",
+                    error=str(exc),
+                    appointment_id=appointment.id,
+                )
 
         _get_audit_service().record(
             company_id=company.id,

@@ -99,6 +99,53 @@ NEGATIVE_MARKERS = {
     "urgente",
 }
 
+FOLLOWUP_POSITIVE_MARKERS = {
+    "sim, quero",
+    "sim quero",
+    "vamos marcar",
+    "vamos agendar",
+    "topo marcar",
+    "bora marcar",
+    "bora agendar",
+    "confirmar novo",
+    "agendar novamente",
+    "marcar novamente",
+}
+
+FOLLOWUP_NEGATIVE_MARKERS = {
+    "nao obrigado",
+    "não obrigado",
+    "nao, obrigado",
+    "não, obrigado",
+    "prefiro nao",
+    "prefiro não",
+    "agora nao",
+    "agora não",
+    "talvez depois",
+    "fica pra depois",
+    "não posso",
+    "nao posso",
+}
+
+FOLLOWUP_FEEDBACK_KEYWORDS = {
+    "feedback",
+    "experiencia",
+    "experiência",
+    "atendimento",
+    "reunião",
+    "reuniao",
+    "serviço",
+    "servico",
+    "melhoria",
+    "elogio",
+    "sugestao",
+    "sugestão",
+    "comentario",
+    "comentário",
+    "observacao",
+    "observação",
+}
+
 GREETING_WORDS = {"oi", "olá", "ola", "bom dia", "boa tarde", "boa noite", "eai", "ei"}
 CLOSING_WORDS = {"obrigado", "obrigada", "valeu", "até mais", "ate mais", "até logo"}
 URGENCY_WORDS = {"urgente", "agora", "imediato", "imediatamente", "socorro", "rápido", "rapido"}
@@ -277,18 +324,40 @@ class ContextEngine:
         if not sanitized:
             return "follow_up"
         tokens = self._tokenize(sanitized)
-        if any(word in sanitized for word in GREETING_WORDS):
+        single_word_greetings = {word for word in GREETING_WORDS if " " not in word}
+        multi_word_greetings = {word for word in GREETING_WORDS if " " in word}
+        if any(token in single_word_greetings for token in tokens):
             return "greeting"
-        if any(word in sanitized for word in CLOSING_WORDS):
-            return "closing"
+        if any(phrase in sanitized for phrase in multi_word_greetings):
+            return "greeting"
         if any(word in sanitized for word in URGENCY_WORDS):
             return "urgency"
         if any(keyword in sanitized for keyword in APPOINTMENT_RESCHEDULE_WORDS):
             return "appointment_reschedule"
         if any(keyword in sanitized for keyword in APPOINTMENT_CONFIRMATION_WORDS):
             return "appointment_confirmation"
+        negative_match = any(marker in sanitized for marker in FOLLOWUP_NEGATIVE_MARKERS)
+        if negative_match or (
+            sanitized.startswith(("nao", "não"))
+            and any(keyword in sanitized for keyword in {"obrigado", "obrigada", "prefiro", "depois", "agora"})
+        ):
+            return "followup_negative"
+        positive_match = any(marker in sanitized for marker in FOLLOWUP_POSITIVE_MARKERS)
+        if positive_match or (
+            sanitized.startswith("sim")
+            and any(keyword in sanitized for keyword in {"marcar", "agendar", "próximo", "proximo", "novo"})
+        ):
+            return "followup_positive"
         if any(keyword in sanitized for keyword in APPOINTMENT_WORDS):
             return "appointment_request"
+        if (
+            len(tokens) >= 6
+            and any(keyword in sanitized for keyword in FOLLOWUP_FEEDBACK_KEYWORDS)
+            and not sanitized.endswith("?")
+        ):
+            return "followup_feedback"
+        if any(word in sanitized for word in CLOSING_WORDS):
+            return "closing"
         if "?" in sanitized or any(token in ("como", "quando", "onde", "qual", "quais", "pode") for token in tokens):
             return "doubt"
         if tokens and len(tokens) <= 2 and tokens[0] in {"sim", "ok", "claro", "beleza", "manda"}:

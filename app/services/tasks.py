@@ -30,7 +30,7 @@ from app.services.abtest_service import ABTestService
 from app.services.analytics_service import AnalyticsService
 from app.services.billing import BillingService
 from app.services.context_engine import ContextEngine, RuntimeContext
-from app.services import cal_service, scheduling_ai
+from app.services import cal_service, followup_service, scheduling_ai
 from app.services.llm import LLMClient
 from app.services.audit import AuditService
 from app.services.persistence import (
@@ -41,7 +41,7 @@ from app.services.persistence import (
 from app.services.security import detect_prompt_injection, sanitize_for_log, sanitize_text
 from app.services.tenancy import TenantContext, queue_name_for_company
 from app.services.whaticket import WhaticketClient, WhaticketError
-from app.models import Appointment, Company
+from app.models import Appointment, Company, FeedbackEvent
 
 
 APPOINTMENT_CONFIRMATION_WORDS = {
@@ -167,6 +167,24 @@ def _handle_agenda_flow(
         finally:
             session.close()
 
+    def _get_latest_followup() -> Appointment | None:
+        session = session_factory()
+        try:
+            if not hasattr(session, "query"):
+                return None
+            return (
+                session.query(Appointment)
+                .filter(
+                    Appointment.company_id == service.company_id,
+                    Appointment.client_phone == number,
+                    Appointment.followup_sent_at.isnot(None),
+                )
+                .order_by(Appointment.followup_sent_at.desc())
+                .first()
+            )
+        finally:
+            session.close()
+
     def _prepare_options(
         cliente_nome: str,
         title: str,
@@ -253,6 +271,52 @@ def _handle_agenda_flow(
         if intro:
             return f"{intro}\n\n{options_message}"
         return options_message
+
+    if intention in {"followup_positive", "followup_negative", "followup_feedback"}:
+        recent_followup = _get_latest_followup()
+        if intention == "followup_positive":
+            if recent_followup is not None:
+                followup_service.registrar_resposta(recent_followup.id, "positive")
+                cliente_nome = recent_followup.client_name or template_vars.get("nome") or "Cliente"
+                title = recent_followup.title or f"Reunião com {cliente_nome}"
+                intro = "Que ótimo! Veja abaixo algumas sugestões para o próximo encontro."
+                return _prepare_options(
+                    cliente_nome,
+                    title,
+                    "awaiting_followup_booking",
+                    {"previous_appointment_id": recent_followup.id, "origin": "followup"},
+                    intro,
+                )
+            return "Perfeito! Vamos iniciar um novo agendamento. Qual período prefere?"
+        if intention == "followup_negative":
+            if recent_followup is not None:
+                followup_service.registrar_resposta(recent_followup.id, "negative")
+            service.context_engine.clear_agenda_state(number)
+            return "Sem problemas! Ficamos à disposição quando quiser retomar."
+        if intention == "followup_feedback":
+            if recent_followup is not None:
+                followup_service.registrar_resposta(
+                    recent_followup.id,
+                    "feedback",
+                    feedback_text=sanitized_message,
+                )
+                session = session_factory()
+                try:
+                    feedback = FeedbackEvent(
+                        company_id=service.company_id,
+                        number=number,
+                        channel="whatsapp",
+                        feedback_type="followup_text",
+                        score=None,
+                        comment=sanitized_message,
+                        details={"appointment_id": recent_followup.id},
+                    )
+                    session.add(feedback)
+                    session.commit()
+                finally:
+                    session.close()
+            service.context_engine.clear_agenda_state(number)
+            return "Agradeço por compartilhar seu feedback! Vamos repassar à equipe."
 
     if state:
         phase = state.get("phase") or "awaiting_confirmation"
