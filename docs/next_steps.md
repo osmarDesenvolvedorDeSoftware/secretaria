@@ -50,6 +50,14 @@
 - **Testes End-to-End do Painel**: automação com Playwright/Cypress para garantir estabilidade da UI.
 - **Feature Flags**: introduzir toggles para habilitar/desabilitar integrações ou modelos LLM conforme necessidade operacional.
 
+## Inteligência e Personalização
+
+| Módulo | Status | Observações |
+| --- | --- | --- |
+| Motor de contexto por cliente | ⚙️ Em construção | Camada `ContextEngine` com cache Redis/PostgreSQL, templates dinâmicos e prompt enriquecido por embeddings. |
+| Worker de aprendizado contínuo | ⚙️ Em construção | `workers/context_trainer.py` reprocessa históricos, atualiza embeddings e publica métricas por número. |
+| Painel de ajuste da IA | ✅ Concluído | `/painel/config` expõe tom de voz, limite de mensagens, frases iniciais e toggle de IA com persistência. |
+
 # Progresso Atual
 
 - Supervisão dos workers com `supervisord` (múltiplos processos, auto-restart e monitor loop com `rq info`) e suporte a fila de dead-letter dedicada.

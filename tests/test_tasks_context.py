@@ -3,13 +3,45 @@ from __future__ import annotations
 import json
 
 from app.config import settings
+import json
+
+from app.config import settings
 from app.services.tasks import TaskService
 from tests.conftest import DummyQueue, DummyRedis
 
 
+class DummySession:
+    def query(self, *args, **kwargs):
+        return self
+
+    def filter(self, *args, **kwargs):  # pragma: no cover - simple passthrough
+        return self
+
+    def order_by(self, *args, **kwargs):  # pragma: no cover - simple passthrough
+        return self
+
+    def first(self):  # pragma: no cover - no persistence in tests
+        return None
+
+    def add(self, *_args, **_kwargs):  # pragma: no cover
+        return None
+
+    def commit(self):  # pragma: no cover
+        return None
+
+    def rollback(self):  # pragma: no cover
+        return None
+
+    def close(self):  # pragma: no cover
+        return None
+
+
 class DummySessionFactory:
-    def __call__(self):  # pragma: no cover - not invoked in these tests
-        raise AssertionError("Session factory should not be used")
+    def __init__(self) -> None:
+        self.session = DummySession()
+
+    def __call__(self):
+        return self.session
 
     def remove(self):
         return None

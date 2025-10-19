@@ -1,0 +1,12 @@
+default:
+  template: "{{saudacao}} {{nome}}! {{resposta}}{{produto}}{{último_assunto}}"
+  defaults:
+    saudacao: "Olá"
+    produto: ""
+    último_assunto: ""
+fallback:
+  template: "{{nome}}, não entendi, posso te redirecionar pro atendente?"
+ai_disabled:
+  template: "{{nome}}, a assistente virtual está desativada agora. Posso te redirecionar pro atendente?"
+technical_issue:
+  template: "Estou com dificuldades técnicas no momento, {{nome}}. {{transferencia}}"
