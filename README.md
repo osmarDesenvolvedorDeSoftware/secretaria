@@ -1,6 +1,6 @@
 # Secretaria Virtual Whaticket
 
-[![Release](https://img.shields.io/badge/version-v2.2-blue.svg)](docs/release_v2.2.md)
+[![Release](https://img.shields.io/badge/version-v2.3-blue.svg)](docs/release_v2.3.md)
 
 Arquitetura pronta para produção para uma secretária virtual integrada ao Whaticket com Flask, Redis, RQ e PostgreSQL.
 
@@ -13,6 +13,7 @@ Arquitetura pronta para produção para uma secretária virtual integrada ao Wha
 - 📄 [Documentação de release v2.0](docs/release_v2.0.md)
 - 📄 [Documentação de release v2.1](docs/release_v2.1.md)
 - 📄 [Documentação de release v2.2](docs/release_v2.2.md)
+- 📄 [Documentação de release v2.3](docs/release_v2.3.md)
 
 * **Multi-tenancy completo** com isolamento por empresa em banco, Redis, filas RQ e JWT multiempresa.
 * **Provisionamento automático** via `/api/tenants/provision` com criação de planos, assinaturas, schemas e redis dedicados.
@@ -28,6 +29,7 @@ Arquitetura pronta para produção para uma secretária virtual integrada ao Wha
 * **Testes** com pytest + cobertura e ambiente Docker pronto.
 * **Agenda Inteligente** com integração Cal.com multi-tenant, webhook assinado e orquestração direta via WhatsApp.
 * **Lembretes e reagendamento inteligente** com confirmações proativas, métricas Prometheus e painel com taxa de presença.
+* **IA de otimização de agenda** com previsão de no-show, reagendamento automático e painel “Insights de Agenda”.
 
 ## Requisitos
 

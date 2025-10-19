@@ -484,6 +484,21 @@
           </div>
         </div>
         <div class="tab-pane fade" id="painel-agenda" role="tabpanel" aria-labelledby="tab-agenda">
+          <div id="agenda-insights-card" class="card shadow-sm mb-3">
+            <div class="card-body">
+              <div class="d-flex flex-wrap justify-content-between align-items-start gap-3">
+                <div class="flex-fill" style="min-width: 220px;">
+                  <h5 class="card-title mb-1">Insights de Agenda</h5>
+                  <p class="text-muted small mb-2">Atualizado em <span id="agenda-insights-updated-at">-</span></p>
+                  <p id="agenda-insights-recommendation" class="mb-3">Carregando insights otimizados...</p>
+                  <button id="btn-agenda-auto-reschedule" class="btn btn-outline-primary btn-sm">Reagendar automaticamente faltas</button>
+                </div>
+                <div class="flex-grow-1" style="min-width: 240px; max-width: 360px;">
+                  <canvas id="agenda-insights-chart" height="160"></canvas>
+                </div>
+              </div>
+            </div>
+          </div>
           <div class="d-flex flex-column gap-3 mb-3">
             <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
               <div class="d-flex flex-wrap align-items-center gap-3">
@@ -636,6 +651,11 @@
         filterClient: document.getElementById('agenda-filter-client'),
         filterGroup: document.getElementById('agenda-filter-group'),
         attendanceRate: document.getElementById('agenda-attendance-rate'),
+        insightsCard: document.getElementById('agenda-insights-card'),
+        insightsRecommendation: document.getElementById('agenda-insights-recommendation'),
+        insightsUpdatedAt: document.getElementById('agenda-insights-updated-at'),
+        insightsChart: document.getElementById('agenda-insights-chart'),
+        autoRescheduleButton: document.getElementById('btn-agenda-auto-reschedule'),
         formWrapper: document.getElementById('agenda-form-wrapper'),
         form: document.getElementById('agenda-create-form'),
         formCancel: document.getElementById('agenda-form-cancel'),
@@ -650,6 +670,7 @@
         },
       };
       let agendaAppointments = [];
+      let agendaInsightsChart = null;
       let agendaQuickFilter = 'all';
       let businessNpsChart = null;
       const toneInputs = document.querySelectorAll('#tone-group input[type="radio"]');
@@ -687,6 +708,15 @@
         if (empathyDisplay && empathyRange) {
           empathyDisplay.textContent = empathyRange.value;
         }
+      }
+
+      function weekdayName(index) {
+        const names = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+        const normalized = Number(index);
+        if (Number.isInteger(normalized) && normalized >= 0 && normalized < names.length) {
+          return names[normalized];
+        }
+        return 'Horário';
       }
 
       function statusBadge(label, status) {
@@ -1380,6 +1410,72 @@
         });
       }
 
+      function renderAgendaInsights(data = {}) {
+        if (!agendaElements.insightsCard) {
+          return;
+        }
+        const recommendationEl = agendaElements.insightsRecommendation;
+        const updatedAtEl = agendaElements.insightsUpdatedAt;
+        const chartCanvas = agendaElements.insightsChart;
+        const suggestions = Array.isArray(data.suggestions) ? data.suggestions : [];
+        if (updatedAtEl) {
+          updatedAtEl.textContent = data.updated_at
+            ? new Date(data.updated_at).toLocaleString('pt-BR')
+            : '—';
+        }
+        if (recommendationEl) {
+          recommendationEl.textContent = data.recommendation || 'Nenhum insight disponível ainda.';
+        }
+        if (!chartCanvas) {
+          return;
+        }
+        const labels = suggestions.length
+          ? suggestions.map((item) => item.label || `${weekdayName(item.weekday)} ${String(item.hour ?? '').padStart(2, '0')}h`)
+          : ['Sem histórico'];
+        const presenceData = suggestions.length
+          ? suggestions.map((item) => Math.round(Number(item.attendance_rate || 0) * 100))
+          : [0];
+        if (agendaInsightsChart) {
+          agendaInsightsChart.destroy();
+        }
+        agendaInsightsChart = new Chart(chartCanvas.getContext('2d'), {
+          type: 'bar',
+          data: {
+            labels,
+            datasets: [
+              {
+                label: 'Taxa de presença (%)',
+                data: presenceData,
+                backgroundColor: '#0d6efd',
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+              y: {
+                beginAtZero: true,
+                max: 100,
+                ticks: { stepSize: 20 },
+              },
+            },
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                callbacks: {
+                  label(context) {
+                    const slot = suggestions[context.dataIndex] || {};
+                    const noShow = Math.round(Number(slot.no_show_prob || 0) * 100);
+                    return `Presença: ${context.parsed.y}% | No-show: ${noShow}%`;
+                  },
+                },
+              },
+            },
+          },
+        });
+      }
+
       async function loadAgenda() {
         if (!ensureAuthentication() || !currentCompanyId) {
           resetAgendaUI();
@@ -1404,6 +1500,7 @@
           agendaAppointments = Array.isArray(data.appointments) ? data.appointments : [];
           updateAttendanceRateDisplay(Number(data.attendance_rate ?? 0));
           renderAgendaTable();
+          await loadAgendaInsights();
         } catch (erro) {
           resetAgendaUI();
           if (agendaElements.alertBox) {
@@ -1411,6 +1508,81 @@
             agendaElements.alertBox.textContent = erro.message || 'Falha ao carregar a agenda.';
             agendaElements.alertBox.classList.remove('d-none');
           }
+        }
+      }
+
+      async function loadAgendaInsights() {
+        if (!agendaElements.insightsCard || !ensureAuthentication() || !currentCompanyId) {
+          return;
+        }
+        try {
+          const response = await fetch(
+            `/api/agenda/insights?company_id=${encodeURIComponent(currentCompanyId)}`,
+            { headers: { Authorization: `Bearer ${authToken}` } },
+          );
+          if (response.status === 401) {
+            setAuthToken('');
+            throw new Error('Sessão expirada. Faça login novamente.');
+          }
+          if (!response.ok) {
+            throw new Error('Não foi possível carregar os insights.');
+          }
+          const data = await response.json();
+          renderAgendaInsights(data);
+        } catch (erro) {
+          if (agendaElements.insightsRecommendation) {
+            agendaElements.insightsRecommendation.textContent = erro.message || 'Falha ao carregar insights.';
+          }
+          if (agendaInsightsChart) {
+            agendaInsightsChart.destroy();
+            agendaInsightsChart = null;
+          }
+        }
+      }
+
+      async function triggerAutoReschedule() {
+        if (!agendaElements.autoRescheduleButton) {
+          return;
+        }
+        if (!ensureAuthentication() || !currentCompanyId) {
+          return;
+        }
+        agendaElements.autoRescheduleButton.disabled = true;
+        try {
+          const response = await fetch('/api/agenda/auto-reschedule', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${authToken}`,
+            },
+            body: JSON.stringify({ company_id: currentCompanyId }),
+          });
+          if (response.status === 401) {
+            setAuthToken('');
+            throw new Error('Sessão expirada. Faça login novamente.');
+          }
+          const data = await response.json();
+          if (!response.ok) {
+            throw new Error(data.error || 'Não foi possível reagendar automaticamente.');
+          }
+          const processed = Number(data.processed || 0);
+          await loadAgenda();
+          if (agendaElements.alertBox) {
+            const success = processed > 0;
+            agendaElements.alertBox.className = success ? 'alert alert-success' : 'alert alert-info';
+            agendaElements.alertBox.textContent = success
+              ? `Revisamos os agendamentos e acionamos sugestões para ${processed} cliente(s).`
+              : 'Nenhum agendamento de alto risco encontrado nas próximas horas.';
+            agendaElements.alertBox.classList.remove('d-none');
+          }
+        } catch (erro) {
+          if (agendaElements.alertBox) {
+            agendaElements.alertBox.className = 'alert alert-danger';
+            agendaElements.alertBox.textContent = erro.message || 'Falha ao reagendar automaticamente.';
+            agendaElements.alertBox.classList.remove('d-none');
+          }
+        } finally {
+          agendaElements.autoRescheduleButton.disabled = false;
         }
       }
 
@@ -2565,6 +2737,9 @@
 
       if (agendaElements.refreshButton) {
         agendaElements.refreshButton.addEventListener('click', () => loadAgenda());
+      }
+      if (agendaElements.autoRescheduleButton) {
+        agendaElements.autoRescheduleButton.addEventListener('click', () => triggerAutoReschedule());
       }
       if (agendaElements.createButton) {
         agendaElements.createButton.addEventListener('click', () => toggleAgendaForm(true));

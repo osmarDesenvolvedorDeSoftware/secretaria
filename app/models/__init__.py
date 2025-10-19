@@ -11,6 +11,7 @@ from .feedback_event import FeedbackEvent
 from .personalization_config import PersonalizationConfig
 from .plan import Plan
 from .project import Project
+from .scheduling_insights import SchedulingInsights
 from .subscription import Subscription
 
 __all__ = [
@@ -27,5 +28,6 @@ __all__ = [
     "PersonalizationConfig",
     "Plan",
     "Project",
+    "SchedulingInsights",
     "Subscription",
 ]

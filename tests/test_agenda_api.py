@@ -69,6 +69,65 @@ def test_appointments_listing(client: FlaskClient, app: Flask) -> None:
     assert "attendance_rate" in data
 
 
+def test_agenda_insights_endpoint_returns_payload(client: FlaskClient, monkeypatch) -> None:
+    headers = _auth_headers(client)
+    payload = {
+        "company_id": 1,
+        "heatmap": [
+            {
+                "weekday": 1,
+                "hour": 14,
+                "attendance_rate": 0.85,
+                "no_show_prob": 0.1,
+                "suggested": True,
+            }
+        ],
+        "suggestions": [
+            {
+                "weekday": 1,
+                "hour": 14,
+                "attendance_rate": 0.85,
+                "no_show_prob": 0.1,
+                "label": "Segunda · 14h-15h",
+            }
+        ],
+        "recommendation": "Segundas têm 30% menos faltas.",
+        "updated_at": datetime.utcnow().isoformat(),
+    }
+
+    monkeypatch.setattr("app.routes.agenda.scheduling_ai.obter_insights", lambda company_id: payload)
+
+    response = client.get("/api/agenda/insights?company_id=1", headers=headers)
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["company_id"] == 1
+    assert data["suggestions"]
+
+
+def test_auto_reschedule_endpoint_invokes_service(client: FlaskClient, monkeypatch) -> None:
+    headers = _auth_headers(client)
+    captured: dict[str, object] = {}
+
+    def fake_reschedule(company_id, **kwargs):
+        captured["company_id"] = company_id
+        captured["kwargs"] = kwargs
+        return {"company_id": company_id, "processed": 0, "results": []}
+
+    monkeypatch.setattr(
+        "app.routes.agenda.auto_reschedule_service.executar_reagendamento",
+        fake_reschedule,
+    )
+
+    response = client.post(
+        "/api/agenda/auto-reschedule",
+        json={"company_id": 1},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["company_id"] == 1
+    assert captured["company_id"] == 1
+
 def test_manual_booking_and_cancel(client: FlaskClient, monkeypatch) -> None:
     headers = _auth_headers(client)
 

@@ -204,11 +204,20 @@ def app(monkeypatch) -> Generator[Flask, None, None]:
     config_settings.rate_limit_ttl_seconds = 60
     test_app = init_app()
     test_app.redis = DummyRedis()  # type: ignore[attr-defined]
+    test_app.queue_class = DummyQueue  # type: ignore[attr-defined]
+    test_app.worker_class = type(
+        "DummyWorker",
+        (),
+        {"all": staticmethod(lambda connection=None: [])},
+    )  # type: ignore[attr-defined]
+    test_app._queue_cache = {}  # type: ignore[attr-defined]
+    test_app._dead_letter_queue_cache = {}  # type: ignore[attr-defined]
     if getattr(test_app, 'analytics_service', None):
         test_app.analytics_service.redis = test_app.redis  # type: ignore[attr-defined]
     if getattr(test_app, 'billing_service', None):
         test_app.billing_service.redis = test_app.redis  # type: ignore[attr-defined]
     test_app.task_queue = DummyQueue()  # type: ignore[attr-defined]
+    test_app.dead_letter_queue = DummyQueue()  # type: ignore[attr-defined]
     Base.metadata.create_all(test_app.db_engine)  # type: ignore[attr-defined]
     with test_app.app_context():
         session = test_app.db_session()  # type: ignore[attr-defined]
