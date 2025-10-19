@@ -102,6 +102,19 @@ NEGATIVE_MARKERS = {
 GREETING_WORDS = {"oi", "olá", "ola", "bom dia", "boa tarde", "boa noite", "eai", "ei"}
 CLOSING_WORDS = {"obrigado", "obrigada", "valeu", "até mais", "ate mais", "até logo"}
 URGENCY_WORDS = {"urgente", "agora", "imediato", "imediatamente", "socorro", "rápido", "rapido"}
+APPOINTMENT_WORDS = {
+    "agendar",
+    "agendamento",
+    "agenda",
+    "marcar horário",
+    "marcar horario",
+    "marcar reun",
+    "reservar horário",
+    "reservar horario",
+    "marcar visita",
+    "schedule",
+    "appointment",
+}
 
 
 @dataclass
@@ -242,6 +255,8 @@ class ContextEngine:
             return "closing"
         if any(word in sanitized for word in URGENCY_WORDS):
             return "urgency"
+        if any(keyword in sanitized for keyword in APPOINTMENT_WORDS):
+            return "appointment_request"
         if "?" in sanitized or any(token in ("como", "quando", "onde", "qual", "quais", "pode") for token in tokens):
             return "doubt"
         if tokens and len(tokens) <= 2 and tokens[0] in {"sim", "ok", "claro", "beleza", "manda"}:
@@ -482,6 +497,31 @@ class ContextEngine:
     def _store_history(self, number: str, messages: Sequence[dict[str, str]], ttl: int) -> None:
         serialized = json.dumps(list(messages))
         self.redis.setex(self._history_key(number), ttl, serialized)
+
+    def _agenda_state_key(self, number: str) -> str:
+        return self.tenant.namespaced_key("agenda", "state", number)
+
+    def get_agenda_state(self, number: str) -> dict[str, Any] | None:
+        raw = self.redis.get(self._agenda_state_key(number))
+        if not raw:
+            return None
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            LOGGER.warning("invalid_agenda_state", number=number)
+            self.redis.delete(self._agenda_state_key(number))
+            return None
+        if isinstance(data, dict):
+            return data
+        return None
+
+    def set_agenda_state(self, number: str, state: dict[str, Any], ttl: int | None = None) -> None:
+        serialized = json.dumps(state)
+        expire = ttl or settings.context_ttl
+        self.redis.setex(self._agenda_state_key(number), expire, serialized)
+
+    def clear_agenda_state(self, number: str) -> None:
+        self.redis.delete(self._agenda_state_key(number))
 
     def _load_profile(self, number: str) -> dict[str, Any]:
         cached = self.redis.get(self._profile_key(number))

@@ -58,6 +58,18 @@
             aria-selected="false"
           >IA de Negócios</button>
         </li>
+        <li class="nav-item" role="presentation">
+          <button
+            class="nav-link"
+            id="tab-agenda"
+            data-bs-toggle="tab"
+            data-bs-target="#painel-agenda"
+            type="button"
+            role="tab"
+            aria-controls="painel-agenda"
+            aria-selected="false"
+          >Agenda</button>
+        </li>
       </ul>
 
       <div class="tab-content">
@@ -471,6 +483,82 @@
             </div>
           </div>
         </div>
+        <div class="tab-pane fade" id="painel-agenda" role="tabpanel" aria-labelledby="tab-agenda">
+          <div class="d-flex flex-column flex-lg-row gap-3 align-items-lg-center justify-content-between mb-3">
+            <div class="d-flex flex-wrap gap-2 align-items-center">
+              <div>
+                <label for="agenda-filter-date" class="form-label mb-0 small text-muted">Filtrar por data</label>
+                <input type="date" id="agenda-filter-date" class="form-control form-control-sm" />
+              </div>
+              <div>
+                <label for="agenda-filter-client" class="form-label mb-0 small text-muted">Filtrar por cliente</label>
+                <input type="text" id="agenda-filter-client" class="form-control form-control-sm" placeholder="Nome ou telefone" />
+              </div>
+            </div>
+            <div class="d-flex gap-2">
+              <button id="btn-agenda-refresh" class="btn btn-outline-secondary btn-sm" type="button">Atualizar</button>
+              <button id="btn-agenda-create" class="btn btn-primary btn-sm" type="button">Criar manualmente</button>
+            </div>
+          </div>
+          <div id="agenda-alert" class="alert alert-info d-none" role="alert"></div>
+          <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle">
+              <thead class="table-light">
+                <tr>
+                  <th>Cliente</th>
+                  <th>Início</th>
+                  <th>Término</th>
+                  <th>Título</th>
+                  <th>Status</th>
+                  <th>Link</th>
+                  <th class="text-end">Ações</th>
+                </tr>
+              </thead>
+              <tbody id="agenda-table"></tbody>
+            </table>
+          </div>
+          <div id="agenda-empty" class="alert alert-warning d-none mt-3" role="alert">
+            Nenhum agendamento encontrado para os filtros atuais.
+          </div>
+          <div id="agenda-form-wrapper" class="card shadow-sm mt-4 d-none">
+            <div class="card-body">
+              <div class="d-flex justify-content-between align-items-center mb-3">
+                <h6 class="mb-0">Criar agendamento manual</h6>
+                <button type="button" class="btn-close" id="agenda-form-cancel" aria-label="Fechar"></button>
+              </div>
+              <form id="agenda-create-form" class="row g-3">
+                <div class="col-md-4">
+                  <label for="agenda-client-name" class="form-label">Nome do cliente</label>
+                  <input type="text" class="form-control" id="agenda-client-name" required />
+                </div>
+                <div class="col-md-4">
+                  <label for="agenda-client-phone" class="form-label">Telefone</label>
+                  <input type="text" class="form-control" id="agenda-client-phone" placeholder="559999999999" required />
+                </div>
+                <div class="col-md-2">
+                  <label for="agenda-date" class="form-label">Data</label>
+                  <input type="date" class="form-control" id="agenda-date" required />
+                </div>
+                <div class="col-md-2">
+                  <label for="agenda-time" class="form-label">Horário</label>
+                  <input type="time" class="form-control" id="agenda-time" required />
+                </div>
+                <div class="col-md-6">
+                  <label for="agenda-title" class="form-label">Título</label>
+                  <input type="text" class="form-control" id="agenda-title" placeholder="Reunião de alinhamento" />
+                </div>
+                <div class="col-md-3">
+                  <label for="agenda-duration" class="form-label">Duração (min)</label>
+                  <input type="number" class="form-control" id="agenda-duration" value="30" min="15" step="15" />
+                </div>
+                <div class="col-12 d-flex justify-content-end gap-2">
+                  <button type="button" class="btn btn-outline-secondary" id="agenda-form-cancel-secondary">Cancelar</button>
+                  <button type="submit" class="btn btn-success">Salvar agendamento</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
@@ -524,6 +612,28 @@
         complianceDeleteForm: document.getElementById('compliance-delete-form'),
         compliancePolicies: document.getElementById('compliance-policies'),
       };
+      const agendaElements = {
+        tableBody: document.getElementById('agenda-table'),
+        emptyAlert: document.getElementById('agenda-empty'),
+        alertBox: document.getElementById('agenda-alert'),
+        refreshButton: document.getElementById('btn-agenda-refresh'),
+        createButton: document.getElementById('btn-agenda-create'),
+        filterDate: document.getElementById('agenda-filter-date'),
+        filterClient: document.getElementById('agenda-filter-client'),
+        formWrapper: document.getElementById('agenda-form-wrapper'),
+        form: document.getElementById('agenda-create-form'),
+        formCancel: document.getElementById('agenda-form-cancel'),
+        formCancelSecondary: document.getElementById('agenda-form-cancel-secondary'),
+        inputs: {
+          name: document.getElementById('agenda-client-name'),
+          phone: document.getElementById('agenda-client-phone'),
+          date: document.getElementById('agenda-date'),
+          time: document.getElementById('agenda-time'),
+          duration: document.getElementById('agenda-duration'),
+          title: document.getElementById('agenda-title'),
+        },
+      };
+      let agendaAppointments = [];
       let businessNpsChart = null;
       const toneInputs = document.querySelectorAll('#tone-group input[type="radio"]');
       const formalityRange = document.getElementById('config-formality');
@@ -1089,6 +1199,247 @@
         }
       }
 
+      function resetAgendaUI() {
+        if (agendaElements.tableBody) {
+          agendaElements.tableBody.innerHTML = '';
+        }
+        if (agendaElements.emptyAlert) {
+          agendaElements.emptyAlert.classList.add('d-none');
+        }
+        if (agendaElements.alertBox) {
+          agendaElements.alertBox.classList.add('d-none');
+          agendaElements.alertBox.textContent = '';
+        }
+        if (agendaElements.form) {
+          agendaElements.form.reset();
+        }
+        if (agendaElements.formWrapper) {
+          agendaElements.formWrapper.classList.add('d-none');
+        }
+        agendaAppointments = [];
+      }
+
+      function filterAgendaData() {
+        const appointments = Array.isArray(agendaAppointments) ? agendaAppointments : [];
+        const dateFilter = agendaElements.filterDate ? agendaElements.filterDate.value : '';
+        const clientFilter = agendaElements.filterClient ? agendaElements.filterClient.value.trim().toLowerCase() : '';
+        return appointments.filter((item) => {
+          const startDate = String(item.start_time || '').slice(0, 10);
+          const matchesDate = !dateFilter || startDate === dateFilter;
+          const name = String(item.client_name || '').toLowerCase();
+          const phone = String(item.client_phone || '').toLowerCase();
+          const matchesClient = !clientFilter || name.includes(clientFilter) || phone.includes(clientFilter);
+          return matchesDate && matchesClient;
+        });
+      }
+
+      function renderAgendaTable() {
+        if (!agendaElements.tableBody) {
+          return;
+        }
+        const filtered = filterAgendaData();
+        if (filtered.length === 0) {
+          agendaElements.tableBody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Nenhum agendamento encontrado.</td></tr>';
+          if (agendaElements.emptyAlert) {
+            agendaElements.emptyAlert.classList.remove('d-none');
+          }
+          return;
+        }
+        if (agendaElements.emptyAlert) {
+          agendaElements.emptyAlert.classList.add('d-none');
+        }
+        agendaElements.tableBody.innerHTML = filtered
+          .map((item) => {
+            const startDate = item.start_time ? new Date(item.start_time) : null;
+            const endDate = item.end_time ? new Date(item.end_time) : null;
+            const startLabel = startDate
+              ? startDate.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
+              : '-';
+            const endLabel = endDate
+              ? endDate.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
+              : '-';
+            const status = String(item.status || 'confirmed').toLowerCase();
+            const badgeClass =
+              status === 'cancelled' ? 'bg-danger' : status === 'rescheduled' ? 'bg-warning text-dark' : 'bg-success';
+            const statusLabel =
+              status === 'cancelled' ? 'Cancelado' : status === 'rescheduled' ? 'Reagendado' : 'Confirmado';
+            const meetingLink = item.meeting_url
+              ? `<a href="${item.meeting_url}" target="_blank" rel="noopener">Abrir</a>`
+              : '-';
+            const actions =
+              status === 'cancelled'
+                ? ''
+                : `<button class="btn btn-sm btn-outline-danger" data-action="cancel-agenda" data-booking-id="${item.cal_booking_id}">Cancelar</button>`;
+            return `
+              <tr>
+                <td>${item.client_name || '-'}</td>
+                <td>${startLabel}</td>
+                <td>${endLabel}</td>
+                <td>${item.title || '-'}</td>
+                <td><span class="badge ${badgeClass}">${statusLabel}</span></td>
+                <td>${meetingLink}</td>
+                <td class="text-end">${actions}</td>
+              </tr>
+            `;
+          })
+          .join('');
+      }
+
+      async function loadAgenda() {
+        if (!ensureAuthentication() || !currentCompanyId) {
+          resetAgendaUI();
+          return;
+        }
+        if (agendaElements.alertBox) {
+          agendaElements.alertBox.classList.add('d-none');
+          agendaElements.alertBox.textContent = '';
+        }
+        try {
+          const response = await fetch(`/api/agenda/appointments?company_id=${encodeURIComponent(currentCompanyId)}`, {
+            headers: { Authorization: `Bearer ${authToken}` },
+          });
+          if (response.status === 401) {
+            setAuthToken('');
+            throw new Error('Sessão expirada. Faça login novamente.');
+          }
+          if (!response.ok) {
+            throw new Error('Não foi possível carregar a agenda.');
+          }
+          const data = await response.json();
+          agendaAppointments = Array.isArray(data.appointments) ? data.appointments : [];
+          renderAgendaTable();
+        } catch (erro) {
+          resetAgendaUI();
+          if (agendaElements.alertBox) {
+            agendaElements.alertBox.className = 'alert alert-danger';
+            agendaElements.alertBox.textContent = erro.message || 'Falha ao carregar a agenda.';
+            agendaElements.alertBox.classList.remove('d-none');
+          }
+        }
+      }
+
+      function toggleAgendaForm(show = true) {
+        if (!agendaElements.formWrapper) {
+          return;
+        }
+        if (show) {
+          agendaElements.formWrapper.classList.remove('d-none');
+        } else {
+          agendaElements.formWrapper.classList.add('d-none');
+          if (agendaElements.form) {
+            agendaElements.form.reset();
+          }
+        }
+      }
+
+      async function submitAgendaForm(event) {
+        event.preventDefault();
+        if (!ensureAuthentication() || !currentCompanyId) {
+          return;
+        }
+        const { name, phone, date, time, duration, title } = agendaElements.inputs;
+        if (!name || !phone || !date || !time) {
+          return;
+        }
+        const nameValue = name.value.trim();
+        const phoneValue = phone.value.trim();
+        const dateValue = date.value;
+        const timeValue = time.value;
+        if (!nameValue || !phoneValue || !dateValue || !timeValue) {
+          if (agendaElements.alertBox) {
+            agendaElements.alertBox.className = 'alert alert-warning';
+            agendaElements.alertBox.textContent = 'Preencha nome, telefone, data e horário.';
+            agendaElements.alertBox.classList.remove('d-none');
+          }
+          return;
+        }
+        const startDate = new Date(`${dateValue}T${timeValue}`);
+        if (Number.isNaN(startDate.getTime())) {
+          if (agendaElements.alertBox) {
+            agendaElements.alertBox.className = 'alert alert-warning';
+            agendaElements.alertBox.textContent = 'Data ou horário inválido.';
+            agendaElements.alertBox.classList.remove('d-none');
+          }
+          return;
+        }
+        const durationMinutes = Math.max(Number.parseInt(duration?.value || '30', 10) || 30, 15);
+        const endDate = new Date(startDate.getTime() + durationMinutes * 60000);
+        const payload = {
+          company_id: currentCompanyId,
+          client: { name: nameValue, phone: phoneValue },
+          horario: { start: startDate.toISOString(), end: endDate.toISOString() },
+          titulo: title && title.value ? title.value.trim() || 'Reunião' : 'Reunião',
+          duracao: durationMinutes,
+        };
+        try {
+          const response = await fetch('/api/agenda/book', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${authToken}`,
+            },
+            body: JSON.stringify(payload),
+          });
+          if (response.status === 401) {
+            setAuthToken('');
+            throw new Error('Sessão expirada. Faça login novamente.');
+          }
+          if (!response.ok) {
+            const errorPayload = await response.json().catch(() => ({}));
+            throw new Error(errorPayload.error || 'Falha ao criar agendamento.');
+          }
+          toggleAgendaForm(false);
+          if (agendaElements.alertBox) {
+            agendaElements.alertBox.className = 'alert alert-success';
+            agendaElements.alertBox.textContent = 'Agendamento criado com sucesso.';
+            agendaElements.alertBox.classList.remove('d-none');
+          }
+          await loadAgenda();
+        } catch (erro) {
+          if (agendaElements.alertBox) {
+            agendaElements.alertBox.className = 'alert alert-danger';
+            agendaElements.alertBox.textContent = erro.message || 'Erro ao criar agendamento.';
+            agendaElements.alertBox.classList.remove('d-none');
+          }
+        }
+      }
+
+      async function cancelAgendaBooking(bookingId) {
+        if (!ensureAuthentication() || !currentCompanyId) {
+          return;
+        }
+        try {
+          const response = await fetch('/api/agenda/cancel', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${authToken}`,
+            },
+            body: JSON.stringify({ company_id: currentCompanyId, booking_id: bookingId }),
+          });
+          if (response.status === 401) {
+            setAuthToken('');
+            throw new Error('Sessão expirada. Faça login novamente.');
+          }
+          if (!response.ok) {
+            const errorPayload = await response.json().catch(() => ({}));
+            throw new Error(errorPayload.error || 'Falha ao cancelar agendamento.');
+          }
+          if (agendaElements.alertBox) {
+            agendaElements.alertBox.className = 'alert alert-success';
+            agendaElements.alertBox.textContent = 'Agendamento cancelado com sucesso.';
+            agendaElements.alertBox.classList.remove('d-none');
+          }
+          await loadAgenda();
+        } catch (erro) {
+          if (agendaElements.alertBox) {
+            agendaElements.alertBox.className = 'alert alert-danger';
+            agendaElements.alertBox.textContent = erro.message || 'Erro ao cancelar agendamento.';
+            agendaElements.alertBox.classList.remove('d-none');
+          }
+        }
+      }
+
       function updateBusinessAlert(message, type = 'info') {
         if (!businessElements.alert) {
           return;
@@ -1518,6 +1869,7 @@
           }
           updatePreview();
           loadBusinessData();
+          loadAgenda();
         } else {
           localStorage.removeItem('panel_token');
           localStorage.removeItem('panel_company_id');
@@ -1544,6 +1896,7 @@
           }
           resetAnalyticsUI();
           resetBusinessUI();
+          resetAgendaUI();
         }
       }
 
@@ -2078,6 +2431,47 @@
             await deleteComplianceData(businessElements.complianceDeleteForm);
           }
         });
+      }
+
+      if (agendaElements.refreshButton) {
+        agendaElements.refreshButton.addEventListener('click', () => loadAgenda());
+      }
+      if (agendaElements.createButton) {
+        agendaElements.createButton.addEventListener('click', () => toggleAgendaForm(true));
+      }
+      if (agendaElements.formCancel) {
+        agendaElements.formCancel.addEventListener('click', () => toggleAgendaForm(false));
+      }
+      if (agendaElements.formCancelSecondary) {
+        agendaElements.formCancelSecondary.addEventListener('click', () => toggleAgendaForm(false));
+      }
+      if (agendaElements.form) {
+        agendaElements.form.addEventListener('submit', submitAgendaForm);
+      }
+      if (agendaElements.filterDate) {
+        agendaElements.filterDate.addEventListener('change', renderAgendaTable);
+      }
+      if (agendaElements.filterClient) {
+        agendaElements.filterClient.addEventListener('input', renderAgendaTable);
+      }
+      if (agendaElements.tableBody) {
+        agendaElements.tableBody.addEventListener('click', (event) => {
+          const target = event.target instanceof HTMLElement ? event.target : null;
+          if (!target) {
+            return;
+          }
+          const button = target.closest('[data-action="cancel-agenda"]');
+          if (button) {
+            const bookingId = button.getAttribute('data-booking-id');
+            if (bookingId && confirm('Deseja cancelar este agendamento?')) {
+              cancelAgendaBooking(bookingId);
+            }
+          }
+        });
+      }
+      const agendaTabButton = document.getElementById('tab-agenda');
+      if (agendaTabButton) {
+        agendaTabButton.addEventListener('shown.bs.tab', () => loadAgenda());
       }
 
       applyToneSelection(document.getElementById('config-tone').value || 'amigavel', { silent: true });

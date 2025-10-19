@@ -153,6 +153,30 @@ token_usage_total = Counter(
     ["company", "direction"],
 )
 
+appointments_total = Counter(
+    f"{settings.metrics_namespace}_appointments_total",
+    "Total de tentativas de agendamento",
+    ["company"],
+)
+
+appointments_confirmed_total = Counter(
+    f"{settings.metrics_namespace}_appointments_confirmed_total",
+    "Total de agendamentos confirmados",
+    ["company"],
+)
+
+appointments_cancelled_total = Counter(
+    f"{settings.metrics_namespace}_appointments_cancelled_total",
+    "Total de agendamentos cancelados",
+    ["company"],
+)
+
+appointments_latency_seconds = Histogram(
+    f"{settings.metrics_namespace}_appointments_latency_seconds",
+    "Latência de criação de agendamentos",
+    ["company"],
+)
+
 healthcheck_failures_total = Counter(
     f"{settings.metrics_namespace}_healthcheck_failures_total",
     "Total de falhas de healthcheck por dependência",
@@ -186,4 +210,8 @@ __all__ = [
     "healthcheck_failures_total",
     "message_usage_total",
     "token_usage_total",
+    "appointments_total",
+    "appointments_confirmed_total",
+    "appointments_cancelled_total",
+    "appointments_latency_seconds",
 ]

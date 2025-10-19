@@ -55,6 +55,16 @@
   - Novo `AuditLog`, middleware de auditoria e painel “IA de Negócios” com gráficos, testes A/B e console LGPD.
   - SLOs adicionais (`webhook_latency_seconds`, `whaticket_delivery_success_ratio`, `llm_error_rate`) e scripts de DR (`make backup`, `make restore`).
 
+## Release v2.1 – Concluído
+
+- Status: ✅ Disponível – Agenda Inteligente conectada ao Cal.com com orquestração WhatsApp multiempresa.
+- Entregas principais:
+  - Serviço `cal_service` com criação/cancelamento de bookings, tratamento de webhooks e registro no `AuditLog`.
+  - Modelo `Appointment`, migração `0008_agenda_cal_integration.py` e métricas Prometheus `secretaria_appointments_*`.
+  - Blueprint `/api/agenda` com rotas de disponibilidade, agendamento manual, cancelamento e webhook HMAC.
+  - Fluxo automático no worker WhatsApp listando opções, confirmando horário e persistindo compromissos.
+  - Aba “Agenda” no painel com tabela dinâmica, filtro por data/cliente, criação manual e live refresh.
+
 | Componente | Status | Observações |
 | --- | --- | --- |
 | Backend Flask (rotas/serviços) | ⚙️ Em validação | Webhook e painel multiempresa concluídos; pendem testes extras para billing e limites por tenant. |

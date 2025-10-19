@@ -1,6 +1,7 @@
-from .analytics_report import AnalyticsReport
 from .ab_event import ABEvent
 from .ab_test import ABTest
+from .analytics_report import AnalyticsReport
+from .appointment import Appointment
 from .audit_log import AuditLog
 from .company import Company
 from .conversation import Conversation
@@ -15,6 +16,7 @@ from .subscription import Subscription
 __all__ = [
     "ABEvent",
     "ABTest",
+    "Appointment",
     "AuditLog",
     "AnalyticsReport",
     "Company",
