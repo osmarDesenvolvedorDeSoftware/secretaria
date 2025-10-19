@@ -8,27 +8,37 @@
   - **v1.1** – hardening de segurança (rotações automáticas de segredos, rate limiting por cliente, testes de carga contínuos).
   - **v2.0** – expansão multicanal (e-mail/SMS), workflows dinâmicos e painel com analytics avançado em tempo real.
 
-## Release v1.1 – Em andamento
+## Release v1.1 – Concluído
 
-- Status: ⚙️ Em validação – arquitetura SaaS multiempresa pronta com billing inicial.
-- Entregas concluídas:
+- Status: ✅ Disponível – arquitetura SaaS multiempresa estável com billing funcional.
+- Entregas:
   - Multi-tenancy completo com modelo `Company`, isolamento Redis/RQ por tenant e JWT com `company_id`.
   - Gestão de planos (`Plan`) e assinaturas (`Subscription`) com `BillingService` e webhook `/webhook/billing`.
   - Painel administrativo atualizado com `/painel/empresas`, dashboard de consumo e métricas por empresa.
   - Prometheus/Grafana expandidos com labels `company_id` para mensagens, tokens e filas.
+
+## Release v1.2 – Em validação
+
+- Status: ⚙️ Nova – foco em auto-provisionamento completo e isolamento operacional.
+- Entregas concluídas nesta versão:
+  - Endpoint `/api/tenants/provision` criando plano, empresa, assinatura e schema PostgreSQL `tenant_<id>` automaticamente.
+  - Redis e filas RQ isoladas por tenant com metadados persistidos (redis://…/tenant_{id} e fila `default:company_{id}`).
+  - Script `scripts/spawn_worker.py` para spawn e registro de workers dedicados com monitoramento no `/metrics`.
+  - `scripts/deploy.sh` ampliado para provisionar subdomínios `chat.<tenant>.<domínio>` e `api.<tenant>.<domínio>` com status de SSL.
+  - Painel com fluxo “Nova Empresa”, acompanhamento de provisionamento (banco, fila, domínio, worker) e token inicial exibido.
 - Pendências para GA:
-  - Documentar fluxo de cobrança e atualização automática de status pós-webhook.
-  - Cobertura de testes para rotas de empresas/billing e validação do painel multiempresa.
-  - Playbooks operacionais para limites excedidos e alertas por tenant.
+  - Automatizar disparo do worker pós-provisionamento (hook ou orquestrador).
+  - Integração real com provedor DNS/ACME em lugar do mock do deploy.
+  - Testes end-to-end cobrindo o fluxo de provisionamento e painel atualizado.
 
 | Componente | Status | Observações |
 | --- | --- | --- |
 | Backend Flask (rotas/serviços) | ⚙️ Em validação | Webhook e painel multiempresa concluídos; pendem testes extras para billing e limites por tenant. |
-| Fila e Workers RQ | ⚠️ Parcial | Worker dedicado e métricas de fila existem, porém falta autoescala, supervisão e estratégia de reprocessamento após falhas críticas do worker. |
+| Fila e Workers RQ | ⚙️ Em validação | Provisionamento automático cria filas isoladas e `spawn_worker.py` registra estado; falta autoescala e orquestração automática pós-provisionamento. |
 | Persistência (PostgreSQL + Redis) | ⚙️ Em validação | Esquema multiempresa migrado; monitoramento de crescimento Redis por tenant precisa de runbooks. |
 | Segurança e Compliance | ⚠️ Parcial | HMAC, rate limiting e mitigação de prompt injection presentes; falta auditoria de acesso, rotação de segredos e proteção DDoS avançada. |
 | Observabilidade & Operações | ✅ Completo | Prometheus integrado, healthcheck profundo e logs estruturados com correlação operacional. |
-| Painel / Frontend interno | ⚠️ Parcial | Painel funcional mas sem autenticação, controles de acesso e testes end-to-end de UI. |
+| Painel / Frontend interno | ⚙️ Em validação | Painel ganhou onboarding "Nova Empresa" e monitoramento de domínio/SSL; pendente RBAC avançado e testes end-to-end. |
 | Integrações Externas (LLM & Whaticket) | ⚠️ Parcial | Retries, circuit breaker e classificação de erros implementados; dependência de tokens fixos e falta de fallback multicanal. |
 
 ## Produção Controlada
@@ -58,9 +68,12 @@
 4. ✅ **Automação de Migrações**: usar Alembic em pipeline CI/CD com validação pré-deploy e rollback automatizado em caso de falha.
 5. ✅ **Segurança do Painel**: implementar autenticação (SSO ou JWT interno), controle de permissão e revisão de logs de acesso.
 6. ✅ **Resiliência de Integrações**: adicionar fila de DLQ e mecanismo de reprocessamento manual para mensagens não entregues; registrar métricas por cliente/campanha.
-7. **Validação de Carga**: executar testes de carga sobre o endpoint /webhook para calibrar timeouts, limites por IP/número e dimensionamento do RQ.
-8. **Alertas por Tenant**: configurar regras no Alertmanager para limites de mensagens/tokens extrapolados por `company_id` e fila saturada.
-9. **Testes de Billing e Painel**: ampliar suíte pytest para cobrir rotas `/painel/empresas`, webhook de billing e UI multiempresa.
+7. **Automação do Worker por Tenant**: orquestrar a execução do `scripts/spawn_worker.py` logo após o provisionamento e adicionar healthcheck dedicado.
+8. **Integração DNS/SSL real**: conectar `scripts/deploy.sh` a um provedor (Cloudflare API ou Certbot) e validar certificados automaticamente.
+9. **Testes ponta-a-ponta do provisionamento**: cobrir a nova jornada “Nova Empresa” com Playwright/Cypress e validar geração de credenciais.
+10. **Validação de Carga**: executar testes de carga sobre o endpoint /webhook para calibrar timeouts, limites por IP/número e dimensionamento do RQ.
+11. **Alertas por Tenant**: configurar regras no Alertmanager para limites de mensagens/tokens extrapolados por `company_id` e fila saturada.
+12. **Testes de Billing e Painel**: ampliar suíte pytest para cobrir rotas `/painel/empresas`, webhook de billing e UI multiempresa.
 
 # Próximas Expansões
 
