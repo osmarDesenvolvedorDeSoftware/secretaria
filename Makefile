@@ -1,11 +1,15 @@
-.PHONY: dev migrate upgrade worker test up down install revision ci-migrate report
+.PHONY: dev migrate upgrade worker test up down install revision ci-migrate report init run deploy
 
 export FLASK_APP=run.py
 
 FORMAT ?= csv
+DEPLOY_ARGS ?=
 
 install:
         python3.11 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt
+
+init: install
+        cp -n .env.example .env || true
 
 dev:
         alembic upgrade head
@@ -21,8 +25,12 @@ upgrade:
         alembic upgrade head
 
 worker:
-	alembic upgrade head
-	python -m app.workers.rq_worker
+        alembic upgrade head
+        python -m app.workers.rq_worker
+
+run:
+        alembic upgrade head
+        python run.py
 
 up:
 	docker compose -f docker/docker-compose.yml up -d --build
@@ -37,8 +45,11 @@ ci-migrate:
         alembic upgrade head || alembic downgrade -1
 
 report:
-	@if [ -z "$(COMPANY_ID)" ]; then \
-		echo "Uso: make report COMPANY_ID=<id> [FORMAT=csv|pdf]"; \
-		exit 1; \
-	fi
-	python -m scripts.export_report --company-id $(COMPANY_ID) --format $(FORMAT)
+        @if [ -z "$(COMPANY_ID)" ]; then \
+                echo "Uso: make report COMPANY_ID=<id> [FORMAT=csv|pdf]"; \
+                exit 1; \
+        fi
+        python -m scripts.export_report --company-id $(COMPANY_ID) --format $(FORMAT)
+
+deploy:
+        ./scripts/deploy.sh $(DEPLOY_ARGS)
