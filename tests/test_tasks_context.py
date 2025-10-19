@@ -3,9 +3,6 @@ from __future__ import annotations
 import json
 
 from app.config import settings
-import json
-
-from app.config import settings
 from app.services.tasks import TaskService
 from tests.conftest import DummyQueue, DummyRedis
 

@@ -1,5 +1,13 @@
 # Resumo de Maturidade Atual
 
+## Release v1.0 – Concluído
+
+- Status: ✅ estabilizado em produção com validações de segurança HTTP, autenticação JWT e isolamento de rede Docker revisados.
+- Confiabilidade: testes automatizados (pytest, métricas, painel, contexto) executados com sucesso; lint garante ausência de imports redundantes e dependências obsoletas.
+- Próximos marcos:
+  - **v1.1** – hardening de segurança (rotações automáticas de segredos, rate limiting por cliente, testes de carga contínuos).
+  - **v2.0** – expansão multicanal (e-mail/SMS), workflows dinâmicos e painel com analytics avançado em tempo real.
+
 | Componente | Status | Observações |
 | --- | --- | --- |
 | Backend Flask (rotas/serviços) | ⚠️ Parcial | Fluxo do webhook robusto, mas depende de variáveis sensíveis e políticas de retry finas ainda não validadas em carga real. |

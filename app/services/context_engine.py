@@ -525,18 +525,18 @@ class ContextEngine:
 
     def _serialize_profile_dict(self, data: dict[str, Any]) -> dict[str, Any]:
         payload = dict(data)
-        for field in ("created_at", "updated_at"):
-            value = payload.get(field)
+        for field_name in ("created_at", "updated_at"):
+            value = payload.get(field_name)
             if value is not None:
-                payload[field] = str(value)
+                payload[field_name] = str(value)
         return payload
 
     def _serialize_config_dict(self, data: dict[str, Any]) -> dict[str, Any]:
         payload = dict(data)
-        for field in ("created_at", "updated_at"):
-            value = payload.get(field)
+        for field_name in ("created_at", "updated_at"):
+            value = payload.get(field_name)
             if value is not None:
-                payload[field] = str(value)
+                payload[field_name] = str(value)
         return payload
 
     def _default_profile(self, number: str) -> dict[str, Any]:
