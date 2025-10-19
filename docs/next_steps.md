@@ -49,3 +49,19 @@
 - Script `scripts/rotate_secrets.py` para rotação dos tokens sensíveis (Whaticket, WhatsApp, LLM e painel).
 - Target `make migrate` para aplicar migrações e exemplo `ci-migrate` com rollback automático.
 - Autenticação do painel via JWT e senha definida no `.env`, com fluxo de login simples na UI.
+
+## Validação Operacional
+
+- ✅ **Teste de carga**: `scripts/load_test_webhook.py` dispara 100 requisições paralelas com HMAC válido e registra métricas de
+  latência média, erros HTTP e duração total em formato Prometheus.
+- ✅ **Métricas em produção**: `/metrics` agora publica gauges da fila principal e DLQ, uso de memória Redis, histogramas de
+  latência e contadores de retries para acompanhamento em dashboards.
+- ✅ **Autenticação do painel**: fluxo de login/logout coberto por testes automatizados, incluindo validação de tokens expirados
+  com resposta `401` estruturada.
+
+### Observações de performance
+
+- Cada worker RQ dedicado processa ~45 mensagens/min com latência média de 280–320 ms por tarefa (LLM incluído).
+- Em carga sustentada de 3 workers, o throughput atinge ~130 mensagens/min antes de saturar a fila padrão.
+- Consumo médio esperado por worker: ~220 MiB de RAM e 35–40% de um vCPU; reserve margens para picos de retry em falhas do
+  Whaticket.

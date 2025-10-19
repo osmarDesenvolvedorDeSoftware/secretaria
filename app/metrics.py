@@ -20,6 +20,11 @@ queue_gauge = Gauge(
     "Tamanho atual da fila RQ",
 )
 
+dead_letter_queue_gauge = Gauge(
+    f"{settings.metrics_namespace}_dead_letter_queue_size",
+    "Tamanho atual da fila dead-letter",
+)
+
 redis_memory_usage_gauge = Gauge(
     f"{settings.metrics_namespace}_redis_memory_usage_bytes",
     "Uso de memória do Redis em bytes",
@@ -71,6 +76,7 @@ __all__ = [
     "webhook_received_counter",
     "task_latency_histogram",
     "queue_gauge",
+    "dead_letter_queue_gauge",
     "redis_memory_usage_gauge",
     "whaticket_latency",
     "whaticket_errors",
