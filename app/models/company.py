@@ -20,6 +20,9 @@ class Company(Base):
         default="ativo",
     )
     current_plan_id = Column(ForeignKey("plans.id", ondelete="SET NULL"), nullable=True)
+    cal_api_key = Column(String(255), nullable=True)
+    cal_webhook_secret = Column(String(255), nullable=True)
+    cal_default_user_id = Column(String(64), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     plan = relationship("Plan", back_populates="companies")
@@ -53,6 +56,11 @@ class Company(Base):
     )
     audit_logs = relationship(
         "AuditLog",
+        back_populates="company",
+        cascade="all, delete-orphan",
+    )
+    appointments = relationship(
+        "Appointment",
         back_populates="company",
         cascade="all, delete-orphan",
     )

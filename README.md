@@ -1,6 +1,6 @@
 # Secretaria Virtual Whaticket
 
-[![Release](https://img.shields.io/badge/version-v2.0-blue.svg)](docs/release_v2.0.md)
+[![Release](https://img.shields.io/badge/version-v2.1-blue.svg)](docs/release_v2.1.md)
 
 Arquitetura pronta para produção para uma secretária virtual integrada ao Whaticket com Flask, Redis, RQ e PostgreSQL.
 
@@ -11,6 +11,7 @@ Arquitetura pronta para produção para uma secretária virtual integrada ao Wha
 - 📄 [Documentação de release v1.2](docs/release_v1.2.md)
 - 📄 [Documentação de release v1.3](docs/release_v1.3.md)
 - 📄 [Documentação de release v2.0](docs/release_v2.0.md)
+- 📄 [Documentação de release v2.1](docs/release_v2.1.md)
 
 * **Multi-tenancy completo** com isolamento por empresa em banco, Redis, filas RQ e JWT multiempresa.
 * **Provisionamento automático** via `/api/tenants/provision` com criação de planos, assinaturas, schemas e redis dedicados.
@@ -24,6 +25,7 @@ Arquitetura pronta para produção para uma secretária virtual integrada ao Wha
 * **Observabilidade** com logs estruturados (structlog), métricas Prometheus e dashboards de consumo e custos por empresa.
 * **Segurança** com sanitização, proteção contra prompt-injection e CORS desabilitado no webhook.
 * **Testes** com pytest + cobertura e ambiente Docker pronto.
+* **Agenda Inteligente** com integração Cal.com multi-tenant, webhook assinado e orquestração direta via WhatsApp.
 
 ## Requisitos
 
@@ -67,6 +69,14 @@ Arquitetura pronta para produção para uma secretária virtual integrada ao Wha
 3. O painel exibirá o progresso do provisionamento e fornecerá o token inicial de acesso e o comando `python scripts/spawn_worker.py --company-id <id>`.
 4. Após o deploy, execute `scripts/deploy.sh --tenant-id <id> --domain exemplo.com` para registrar subdomínios `chat.<tenant>.exemplo.com` e `api.<tenant>.exemplo.com` com status de SSL.
 5. Inicie o worker dedicado com `python scripts/spawn_worker.py --company-id <id>` (opcionalmente definindo `--queue` ou `--burst`).
+
+### v2.1 – Agenda Inteligente (Cal.com)
+
+1. Preencha os campos `cal_api_key`, `cal_default_user_id` e `cal_webhook_secret` da empresa no painel ou via banco de dados.
+2. Configure o webhook do Cal.com para `POST /api/agenda/webhook/cal` com os headers `X-Cal-Company` e `X-Cal-Signature` (HMAC SHA-256).
+3. Ative o fluxo WhatsApp: mensagens do cliente pedindo agendamento retornam sugestões automáticas de horário e confirmação com link.
+4. Utilize a nova aba **Agenda** do painel para visualizar compromissos, filtrar por data/cliente e criar reuniões manualmente.
+5. Monitore as métricas `secretaria_appointments_*` no Grafana “Agenda Inteligente” para acompanhar taxa de confirmação e latência.
 
 ## Comandos Principais
 
@@ -168,6 +178,10 @@ Expostas em `/metrics` no formato Prometheus com `HELP`/`TYPE` padrão. Destaque
 * `secretaria_llm_errors_total`
 * `secretaria_llm_error_rate`
 * `secretaria_llm_prompt_injection_blocked_total`
+* `secretaria_appointments_total`
+* `secretaria_appointments_confirmed_total`
+* `secretaria_appointments_cancelled_total`
+* `secretaria_appointments_latency_seconds`
 * `secretaria_healthcheck_failures_total{component="redis|postgres|rq_worker"}`
 * `secretaria_queue_size{company_id="..."}`
 * `secretaria_usage_messages_total{company_id="..."}`

@@ -268,6 +268,7 @@ def init_app() -> Flask:
     from app.routes.feedback import feedback_bp
     from app.routes.recommendations import recommendation_bp
     from app.routes.projects import bp as projects_bp
+    from app.routes.agenda import agenda_bp
 
     app.register_blueprint(health_bp)
     app.register_blueprint(webhook_bp)
@@ -277,6 +278,7 @@ def init_app() -> Flask:
     app.register_blueprint(feedback_bp)
     app.register_blueprint(compliance_bp)
     app.register_blueprint(projects_bp)
+    app.register_blueprint(agenda_bp)
 
     return app
 
