@@ -263,11 +263,19 @@ def init_app() -> Flask:
         return app.response_class(generate_latest(), mimetype=CONTENT_TYPE_LATEST)
 
     from app.routes.analytics import analytics_bp
+    from app.routes.abtests import abtest_bp
+    from app.routes.compliance import compliance_bp
+    from app.routes.feedback import feedback_bp
+    from app.routes.recommendations import recommendation_bp
     from app.routes.projects import bp as projects_bp
 
     app.register_blueprint(health_bp)
     app.register_blueprint(webhook_bp)
     app.register_blueprint(analytics_bp)
+    app.register_blueprint(recommendation_bp)
+    app.register_blueprint(abtest_bp)
+    app.register_blueprint(feedback_bp)
+    app.register_blueprint(compliance_bp)
     app.register_blueprint(projects_bp)
 
     return app

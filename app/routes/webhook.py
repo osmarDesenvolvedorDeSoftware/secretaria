@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 from flask import Blueprint, Response, current_app, g, jsonify, request
 from pydantic import BaseModel, ValidationError, field_validator, model_validator
 from rq import Queue
 
-from app.metrics import webhook_received_counter
+from app.metrics import webhook_latency_seconds, webhook_received_counter
 from app.services.billing import BillingService
 from app.services.payload import extract_number, extract_text_and_kind
 from app.services.rate_limit import RateLimiter
@@ -60,34 +61,41 @@ class IncomingWebhook(BaseModel):
 
 @webhook_bp.post("/whaticket")
 def whaticket_webhook() -> Response:
+    start_time = time.time()
     raw_body = request.get_data()
 
     if not validate_hmac_signature(request):
         webhook_received_counter.labels(company="unknown", status="unauthorized").inc()
+        webhook_latency_seconds.labels(company="unknown").observe(time.time() - start_time)
         return jsonify({"error": "invalid signature"}), 401
 
     if not validate_webhook_token(request):
         webhook_received_counter.labels(company="unknown", status="unauthorized").inc()
+        webhook_latency_seconds.labels(company="unknown").observe(time.time() - start_time)
         return jsonify({"error": "invalid token"}), 401
 
     try:
         payload = IncomingWebhook.parse_raw_body(raw_body)
     except (json.JSONDecodeError, ValidationError) as exc:
         webhook_received_counter.labels(company="unknown", status="bad_request").inc()
+        webhook_latency_seconds.labels(company="unknown").observe(time.time() - start_time)
         return jsonify({"error": "invalid payload", "details": str(exc)}), 400
 
     tenant = getattr(g, "tenant", None)
     company_label = tenant.label if tenant else "unknown"
     if tenant is None:
         webhook_received_counter.labels(company=company_label, status="company_not_found").inc()
+        webhook_latency_seconds.labels(company=company_label).observe(time.time() - start_time)
         return jsonify({"error": "company_not_found"}), 404
 
     rate_limiter = RateLimiter(current_app.redis, tenant)  # type: ignore[attr-defined]
     if not rate_limiter.check_ip(request.remote_addr or "unknown"):
         webhook_received_counter.labels(company=company_label, status="rate_limited_ip").inc()
+        webhook_latency_seconds.labels(company=company_label).observe(time.time() - start_time)
         return jsonify({"error": "too_many_requests_ip"}), 429
     if not rate_limiter.check_number(payload.number):
         webhook_received_counter.labels(company=company_label, status="rate_limited_number").inc()
+        webhook_latency_seconds.labels(company=company_label).observe(time.time() - start_time)
         return jsonify({"error": "too_many_requests_number"}), 429
 
     sanitized_number = payload.number
@@ -127,4 +135,5 @@ def whaticket_webhook() -> Response:
 
     service.enqueue(sanitized_number, sanitized_text, payload.kind, correlation_id)
     webhook_received_counter.labels(company=company_label, status="accepted").inc()
+    webhook_latency_seconds.labels(company=company_label).observe(time.time() - start_time)
     return jsonify({"queued": True}), 202

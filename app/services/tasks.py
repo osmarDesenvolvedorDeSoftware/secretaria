@@ -18,8 +18,10 @@ from app.metrics import (
     whaticket_latency,
     whaticket_send_retry_total,
     whaticket_send_success_total,
+    whaticket_delivery_success_ratio,
 )
 from app.config import settings
+from app.services.abtest_service import ABTestService
 from app.services.analytics_service import AnalyticsService
 from app.services.billing import BillingService
 from app.services.context_engine import ContextEngine, RuntimeContext
@@ -52,6 +54,7 @@ class TaskService:
         self.llm_client = LLMClient(redis_client, tenant)
         self.whaticket_client = WhaticketClient(redis_client, tenant)
         self.context_engine = ContextEngine(redis_client, session_factory, tenant)
+        self.abtest_service = ABTestService(session_factory, redis_client)
         self.dead_letter_queue = dead_letter_queue or Queue(
             queue_name_for_company(settings.dead_letter_queue_name, tenant.company_id),
             connection=redis_client,
@@ -128,6 +131,21 @@ class TaskService:
             result_ttl=settings.dead_letter_result_ttl,
         )
         return getattr(job, "id", str(uuid.uuid4()))
+
+    def _update_delivery_ratio(self, success: bool) -> None:
+        key = self.tenant.namespaced_key("metrics", "delivery", "whaticket")
+        try:
+            field = "success" if success else "failure"
+            self.redis.hincrby(key, field, 1)
+            data = self.redis.hgetall(key) or {}
+            success_count = int(data.get("success", 0) or 0)
+            failure_count = int(data.get("failure", 0) or 0)
+            total = success_count + failure_count
+            if total > 0:
+                ratio = success_count / total
+                whaticket_delivery_success_ratio.labels(company=self.company_label).set(ratio)
+        except Exception:
+            pass
 
 
 def process_incoming_message(
@@ -230,6 +248,17 @@ def process_incoming_message(
             template_vars["mensagem_usuario"] = sanitized
             user_message = sanitized
             selected_template = runtime_context.template_name or "default"
+            ab_selection = None
+            try:
+                ab_selection = service.abtest_service.select_variant(
+                    service.company_id,
+                    selected_template,
+                )
+            except Exception:
+                logger.debug("abtest_selection_failed", template=selected_template)
+                ab_selection = None
+            if ab_selection is not None:
+                selected_template = ab_selection.template_name or selected_template
             if not service.context_engine.template_exists(selected_template):
                 selected_template = "default"
 
@@ -286,6 +315,21 @@ def process_incoming_message(
                     outbound_tokens=outbound_tokens,
                     response_time=response_time_for_analytics,
                 )
+                if ab_selection is not None:
+                    try:
+                        service.abtest_service.record_event(
+                            service.company_id,
+                            ab_selection.ab_test_id,
+                            ab_selection.variant,
+                            "response",
+                            response_time=response_time_for_analytics,
+                        )
+                    except Exception:
+                        logger.debug(
+                            "abtest_event_record_failed",
+                            test_id=ab_selection.ab_test_id,
+                            variant=ab_selection.variant,
+                        )
 
             whaticket_start = time.time()
             external_id = None
@@ -297,6 +341,7 @@ def process_incoming_message(
                 success = True
                 delivery_status = "SENT"
                 whaticket_send_success_total.labels(company=service.company_label).inc()
+                service._update_delivery_ratio(True)
             except WhaticketError as exc:
                 error_detail = sanitize_for_log(str(exc))
                 logger.exception("whaticket_failure", error=error_detail)
@@ -304,6 +349,7 @@ def process_incoming_message(
                 whaticket_latency.labels(company=service.company_label).observe(
                     time.time() - whaticket_start
                 )
+                service._update_delivery_ratio(False)
                 if exc.retryable:
                     whaticket_send_retry_total.labels(company=service.company_label).inc()
                     if job is not None and job.retries_left == 0:
@@ -323,6 +369,7 @@ def process_incoming_message(
                     time.time() - whaticket_start
                 )
                 delivery_status = "FAILED_PERMANENT"
+                service._update_delivery_ratio(False)
                 raise
             finally:
                 session = session_factory()  # type: ignore[operator]

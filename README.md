@@ -1,6 +1,6 @@
 # Secretaria Virtual Whaticket
 
-[![Release](https://img.shields.io/badge/version-v1.3-blue.svg)](docs/release_v1.3.md)
+[![Release](https://img.shields.io/badge/version-v2.0-blue.svg)](docs/release_v2.0.md)
 
 Arquitetura pronta para produção para uma secretária virtual integrada ao Whaticket com Flask, Redis, RQ e PostgreSQL.
 
@@ -10,6 +10,7 @@ Arquitetura pronta para produção para uma secretária virtual integrada ao Wha
 - 📄 [Documentação de release v1.1](docs/release_v1.1.md)
 - 📄 [Documentação de release v1.2](docs/release_v1.2.md)
 - 📄 [Documentação de release v1.3](docs/release_v1.3.md)
+- 📄 [Documentação de release v2.0](docs/release_v2.0.md)
 
 * **Multi-tenancy completo** com isolamento por empresa em banco, Redis, filas RQ e JWT multiempresa.
 * **Provisionamento automático** via `/api/tenants/provision` com criação de planos, assinaturas, schemas e redis dedicados.
@@ -50,6 +51,14 @@ Arquitetura pronta para produção para uma secretária virtual integrada ao Wha
 2. O backend agrega o uso em tempo real, calcula o custo incremental com base em `BILLING_COST_PER_MESSAGE` e `BILLING_COST_PER_THOUSAND_TOKENS` e dispara alertas quando 80% e 100% do plano são atingidos.
 3. Utilize os endpoints protegidos `/api/analytics/summary?company_id=...` e `/api/analytics/history?period=week|month&company_id=...` para integrar com outras ferramentas.
 4. Gere relatórios CSV ou PDF diretamente pelo painel ou via CLI com `make report COMPANY_ID=<id> FORMAT=csv|pdf`.
+
+### v2.0 – IA de Negócios & Compliance
+
+1. A nova aba **IA de Negócios** centraliza os insights de churn, recomendações de upsell e a “next best action” por tenant, além de gráficos de NPS e acompanhamento de testes A/B.
+2. O motor de recomendações (`/api/recommendations/*`) combina RFM simplificado, consumo em tempo real e feedbacks coletados para sugerir upgrades e ações automáticas, registrando gatilhos no painel e webhooks por tenant.
+3. O módulo de **A/B testing** (`/api/abtests/*`) cria experimentos epsilon-greedy, registra eventos de impressões/conversões e promove variantes vencedoras, com gerenciamento completo no painel.
+4. A seção de **Compliance LGPD** oferece exportação e exclusão auditada por telefone, políticas de retenção configuráveis e auditoria centralizada (`AuditLog`).
+5. Novos SLOs e alertas expõem métricas de latência de webhook, taxa de sucesso Whaticket e erro do LLM, com gauge de error budget e scripts de DR (`make backup`/`make restore`).
 
 ### Provisionamento automático de tenants
 
@@ -154,8 +163,10 @@ Expostas em `/metrics` no formato Prometheus com `HELP`/`TYPE` padrão. Destaque
 * `secretaria_whaticket_errors_total`
 * `secretaria_whaticket_send_success_total`
 * `secretaria_whaticket_send_retry_total`
+* `secretaria_whaticket_delivery_success_ratio`
 * `secretaria_llm_latency_seconds`
 * `secretaria_llm_errors_total`
+* `secretaria_llm_error_rate`
 * `secretaria_llm_prompt_injection_blocked_total`
 * `secretaria_healthcheck_failures_total{component="redis|postgres|rq_worker"}`
 * `secretaria_queue_size{company_id="..."}`

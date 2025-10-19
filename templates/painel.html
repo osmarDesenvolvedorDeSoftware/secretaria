@@ -46,6 +46,18 @@
             aria-selected="false"
           >Analytics e Consumo</button>
         </li>
+        <li class="nav-item" role="presentation">
+          <button
+            class="nav-link"
+            id="tab-business"
+            data-bs-toggle="tab"
+            data-bs-target="#painel-business"
+            type="button"
+            role="tab"
+            aria-controls="painel-business"
+            aria-selected="false"
+          >IA de Negócios</button>
+        </li>
       </ul>
 
       <div class="tab-content">
@@ -321,6 +333,144 @@
             </div>
           </div>
         </div>
+        <div class="tab-pane fade" id="painel-business" role="tabpanel" aria-labelledby="tab-business">
+          <div id="business-alert" class="alert alert-info d-none"></div>
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <h5 class="mb-0">Insights de IA de Negócios</h5>
+            <div class="btn-group btn-group-sm" role="group">
+              <button id="btn-business-refresh" class="btn btn-outline-primary" type="button">Recalcular</button>
+              <button id="btn-business-webhook" class="btn btn-outline-secondary" type="button">Atualizar webhook</button>
+            </div>
+          </div>
+          <div class="row g-3 mb-4">
+            <div class="col-lg-4">
+              <div class="card shadow-sm h-100">
+                <div class="card-body">
+                  <h6 class="card-title">Risco de churn</h6>
+                  <p class="display-6" id="business-churn-score">-</p>
+                  <p class="text-muted small" id="business-next-action">Aguardando avaliação.</p>
+                  <div class="small text-muted" id="business-generated-at"></div>
+                </div>
+              </div>
+            </div>
+            <div class="col-lg-4">
+              <div class="card shadow-sm h-100">
+                <div class="card-body">
+                  <h6 class="card-title">Uso do plano</h6>
+                  <div class="mb-2">
+                    <span class="badge bg-primary" id="business-messages-usage">-</span>
+                    <span class="badge bg-success" id="business-tokens-usage">-</span>
+                  </div>
+                  <p class="small text-muted" id="business-plan-limits">-</p>
+                  <p class="mb-0 small" id="business-estimated-cost">-</p>
+                </div>
+              </div>
+            </div>
+            <div class="col-lg-4">
+              <div class="card shadow-sm h-100">
+                <div class="card-body">
+                  <h6 class="card-title">Feedback e NPS</h6>
+                  <p class="h4 mb-1" id="business-feedback-ratio">-</p>
+                  <p class="mb-2 text-muted small">Satisfação agregada via quick-replies.</p>
+                  <div>
+                    <canvas id="business-nps-chart" height="120"></canvas>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="card shadow-sm mb-4">
+            <div class="card-body">
+              <div class="d-flex justify-content-between align-items-center mb-3">
+                <h6 class="mb-0">Testes A/B ativos</h6>
+                <button class="btn btn-sm btn-primary" id="btn-abtest-open">Novo teste</button>
+              </div>
+              <div class="table-responsive">
+                <table class="table table-sm" id="abtests-table">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Template base</th>
+                      <th>Status</th>
+                      <th>Resultado</th>
+                      <th>Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+              <div class="collapse" id="abtest-form-wrapper">
+                <hr>
+                <form id="abtest-form" class="row g-3">
+                  <div class="col-md-4">
+                    <label class="form-label" for="abtest-template-base">Template base</label>
+                    <input type="text" class="form-control" id="abtest-template-base" required>
+                  </div>
+                  <div class="col-md-2">
+                    <label class="form-label" for="abtest-epsilon">Epsilon</label>
+                    <input type="number" min="0" max="1" step="0.05" value="0.1" class="form-control" id="abtest-epsilon">
+                  </div>
+                  <div class="col-md-3">
+                    <label class="form-label" for="abtest-variant-a">Variante A (template)</label>
+                    <input type="text" class="form-control" id="abtest-variant-a" placeholder="default">
+                  </div>
+                  <div class="col-md-3">
+                    <label class="form-label" for="abtest-variant-b">Variante B (template)</label>
+                    <input type="text" class="form-control" id="abtest-variant-b" placeholder="promocional">
+                  </div>
+                  <div class="col-12">
+                    <label class="form-label" for="abtest-target-metrics">Métricas alvo (separadas por vírgula)</label>
+                    <input type="text" class="form-control" id="abtest-target-metrics" placeholder="conversion_rate,response_time">
+                  </div>
+                  <div class="col-12 d-flex justify-content-end">
+                    <button type="submit" class="btn btn-success btn-sm me-2">Salvar teste</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="abtest-form-cancel">Cancelar</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </div>
+          <div class="card shadow-sm">
+            <div class="card-body">
+              <h6 class="card-title">Compliance e direitos do titular</h6>
+              <div class="row g-3">
+                <div class="col-md-6">
+                  <form id="compliance-export-form" class="card card-body border-0 shadow-sm h-100">
+                    <h6 class="mb-2">Exportar dados</h6>
+                    <div class="mb-2">
+                      <label class="form-label" for="compliance-export-number">Telefone</label>
+                      <input type="text" class="form-control" id="compliance-export-number" placeholder="559999999999" required>
+                    </div>
+                    <div class="mb-3">
+                      <label class="form-label" for="compliance-export-format">Formato</label>
+                      <select class="form-select" id="compliance-export-format">
+                        <option value="json" selected>JSON</option>
+                        <option value="csv">CSV</option>
+                      </select>
+                    </div>
+                    <button type="submit" class="btn btn-outline-primary btn-sm">Exportar</button>
+                  </form>
+                </div>
+                <div class="col-md-6">
+                  <form id="compliance-delete-form" class="card card-body border-0 shadow-sm h-100">
+                    <h6 class="mb-2">Excluir dados (Right to be Forgotten)</h6>
+                    <div class="mb-3">
+                      <label class="form-label" for="compliance-delete-number">Telefone</label>
+                      <input type="text" class="form-control" id="compliance-delete-number" placeholder="559999999999" required>
+                    </div>
+                    <button type="submit" class="btn btn-outline-danger btn-sm">Excluir registros</button>
+                    <div class="form-text">Operação auditada automaticamente.</div>
+                  </form>
+                </div>
+              </div>
+              <hr>
+              <div>
+                <h6 class="mb-2">Políticas configuradas</h6>
+                <pre class="bg-light p-3 small" id="compliance-policies" style="min-height: 120px;">Carregando...</pre>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
@@ -352,6 +502,29 @@
       };
       let analyticsCharts = {};
       let analyticsHistoryPeriod = analyticsPeriodSelect ? analyticsPeriodSelect.value : 'week';
+      const businessElements = {
+        alert: document.getElementById('business-alert'),
+        churn: document.getElementById('business-churn-score'),
+        nextAction: document.getElementById('business-next-action'),
+        generatedAt: document.getElementById('business-generated-at'),
+        messagesUsage: document.getElementById('business-messages-usage'),
+        tokensUsage: document.getElementById('business-tokens-usage'),
+        planLimits: document.getElementById('business-plan-limits'),
+        estimatedCost: document.getElementById('business-estimated-cost'),
+        feedbackRatio: document.getElementById('business-feedback-ratio'),
+        webhookButton: document.getElementById('btn-business-webhook'),
+        refreshButton: document.getElementById('btn-business-refresh'),
+        npsCanvas: document.getElementById('business-nps-chart'),
+        abtestsTable: document.querySelector('#abtests-table tbody'),
+        abtestFormWrapper: document.getElementById('abtest-form-wrapper'),
+        abtestForm: document.getElementById('abtest-form'),
+        abtestOpen: document.getElementById('btn-abtest-open'),
+        abtestCancel: document.getElementById('abtest-form-cancel'),
+        complianceExportForm: document.getElementById('compliance-export-form'),
+        complianceDeleteForm: document.getElementById('compliance-delete-form'),
+        compliancePolicies: document.getElementById('compliance-policies'),
+      };
+      let businessNpsChart = null;
       const toneInputs = document.querySelectorAll('#tone-group input[type="radio"]');
       const formalityRange = document.getElementById('config-formality');
       const empathyRange = document.getElementById('config-empathy');
@@ -875,6 +1048,455 @@
         }
       }
 
+      function resetBusinessUI() {
+        if (businessElements.churn) {
+          businessElements.churn.textContent = '-';
+        }
+        if (businessElements.nextAction) {
+          businessElements.nextAction.textContent = 'Aguardando avaliação.';
+        }
+        if (businessElements.generatedAt) {
+          businessElements.generatedAt.textContent = '';
+        }
+        if (businessElements.messagesUsage) {
+          businessElements.messagesUsage.textContent = '-';
+        }
+        if (businessElements.tokensUsage) {
+          businessElements.tokensUsage.textContent = '-';
+        }
+        if (businessElements.planLimits) {
+          businessElements.planLimits.textContent = '-';
+        }
+        if (businessElements.estimatedCost) {
+          businessElements.estimatedCost.textContent = '-';
+        }
+        if (businessElements.feedbackRatio) {
+          businessElements.feedbackRatio.textContent = '-';
+        }
+        if (businessElements.abtestsTable) {
+          businessElements.abtestsTable.innerHTML = '<tr><td colspan="5" class="text-muted">Nenhum teste cadastrado.</td></tr>';
+        }
+        if (businessElements.compliancePolicies) {
+          businessElements.compliancePolicies.textContent = 'Faça login para carregar as políticas.';
+        }
+        if (businessElements.alert) {
+          businessElements.alert.classList.add('d-none');
+          businessElements.alert.textContent = '';
+        }
+        if (businessNpsChart) {
+          businessNpsChart.destroy();
+          businessNpsChart = null;
+        }
+      }
+
+      function updateBusinessAlert(message, type = 'info') {
+        if (!businessElements.alert) {
+          return;
+        }
+        if (!message) {
+          businessElements.alert.classList.add('d-none');
+          businessElements.alert.textContent = '';
+          return;
+        }
+        businessElements.alert.textContent = message;
+        businessElements.alert.className = `alert alert-${type}`;
+      }
+
+      function renderBusinessInsights(insights) {
+        if (!insights) {
+          resetBusinessUI();
+          return;
+        }
+        if (businessElements.churn) {
+          const churn = Number(insights.churn_score ?? 0);
+          businessElements.churn.textContent = `${(churn * 100).toFixed(1)}%`;
+        }
+        if (businessElements.nextAction) {
+          const action = insights.next_best_action || {};
+          const message = action.message || 'Sem ação sugerida.';
+          businessElements.nextAction.textContent = message;
+        }
+        if (businessElements.generatedAt) {
+          businessElements.generatedAt.textContent = insights.generated_at
+            ? `Gerado em ${new Date(insights.generated_at).toLocaleString('pt-BR')}`
+            : '';
+        }
+        const usage = insights.plan_usage || {};
+        if (businessElements.messagesUsage) {
+          const ratio = Number(usage.messages_ratio ?? 0) * 100;
+          businessElements.messagesUsage.textContent = `Mensagens: ${ratio.toFixed(1)}%`;
+        }
+        if (businessElements.tokensUsage) {
+          const ratio = Number(usage.tokens_ratio ?? 0) * 100;
+          businessElements.tokensUsage.textContent = `Tokens: ${ratio.toFixed(1)}%`;
+        }
+        if (businessElements.planLimits) {
+          businessElements.planLimits.textContent = `Limites: ${usage.message_limit ?? '-'} msgs · ${usage.token_limit ?? '-'} tokens`;
+        }
+        if (businessElements.estimatedCost) {
+          businessElements.estimatedCost.textContent = `Custo estimado: ${formatCurrency(Number(insights.estimated_cost ?? 0))}`;
+        }
+        if (businessElements.feedbackRatio) {
+          const feedback = insights.feedback || {};
+          const ratio = Number(feedback.positive_ratio ?? 0) * 100;
+          const nps = Number(feedback.average_nps ?? 0);
+          businessElements.feedbackRatio.textContent = `Satisfação: ${ratio.toFixed(1)}% · NPS médio ${nps.toFixed(1)}`;
+          if (businessElements.npsCanvas) {
+            const dataset = [Math.max(ratio, 0), Math.max(100 - ratio, 0)];
+            if (!businessNpsChart) {
+              businessNpsChart = new Chart(businessElements.npsCanvas, {
+                type: 'doughnut',
+                data: {
+                  labels: ['Positivo', 'Demais'],
+                  datasets: [
+                    {
+                      data: dataset,
+                      backgroundColor: ['#0d6efd', '#dee2e6'],
+                    },
+                  ],
+                },
+                options: {
+                  plugins: { legend: { display: false } },
+                  cutout: '70%',
+                },
+              });
+            } else {
+              businessNpsChart.data.datasets[0].data = dataset;
+              businessNpsChart.update();
+            }
+          }
+        }
+        if (Array.isArray(insights.upgrade_suggestions) && insights.upgrade_suggestions.length > 0) {
+          updateBusinessAlert(insights.upgrade_suggestions[0].reason || 'Limite próximo do plano.', 'warning');
+        } else {
+          updateBusinessAlert('', 'info');
+        }
+      }
+
+      async function loadBusinessInsights() {
+        if (!ensureAuthentication() || !currentCompanyId) {
+          resetBusinessUI();
+          return;
+        }
+        try {
+          const response = await fetch(`/api/recommendations/insights?company_id=${encodeURIComponent(currentCompanyId)}`, {
+            headers: { Authorization: `Bearer ${authToken}` },
+          });
+          if (response.status === 401) {
+            setAuthToken('');
+            throw new Error('Sessão expirada. Faça login novamente.');
+          }
+          if (!response.ok) {
+            throw new Error('Falha ao carregar insights.');
+          }
+          const payload = await response.json();
+          renderBusinessInsights(payload);
+        } catch (erro) {
+          updateBusinessAlert(erro.message || 'Não foi possível carregar insights.', 'danger');
+        }
+      }
+
+      async function evaluateBusinessInsights(webhookUrl = null) {
+        if (!ensureAuthentication() || !currentCompanyId) {
+          return;
+        }
+        try {
+          const body = { company_id: currentCompanyId };
+          if (webhookUrl) {
+            body.webhook_url = webhookUrl;
+          }
+          const response = await fetch('/api/recommendations/evaluate', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${authToken}`,
+            },
+            body: JSON.stringify(body),
+          });
+          if (response.status === 401) {
+            setAuthToken('');
+            throw new Error('Sessão expirada. Faça login novamente.');
+          }
+          if (!response.ok) {
+            const errorPayload = await response.json().catch(() => ({}));
+            throw new Error(errorPayload.error || 'Falha ao recalcular insights.');
+          }
+          const data = await response.json();
+          renderBusinessInsights(data);
+          updateBusinessAlert('Insights recalculados com sucesso.', 'success');
+        } catch (erro) {
+          updateBusinessAlert(erro.message || 'Erro ao recalcular insights.', 'danger');
+        }
+      }
+
+      function renderAbTests(items) {
+        if (!businessElements.abtestsTable) {
+          return;
+        }
+        if (!Array.isArray(items) || items.length === 0) {
+          businessElements.abtestsTable.innerHTML = '<tr><td colspan="5" class="text-muted">Nenhum teste cadastrado.</td></tr>';
+          return;
+        }
+        businessElements.abtestsTable.innerHTML = items.map((test) => {
+          const status = test.status || 'draft';
+          const winning = test.winning_variant ? `Vencedor: ${test.winning_variant}` : '-';
+          const metrics = test.metrics || {};
+          const variantA = metrics.A || {};
+          const variantB = metrics.B || {};
+          const actions = [];
+          if (status === 'running') {
+            actions.push(`<button class="btn btn-sm btn-outline-danger" data-abtest-stop="${test.id}">Parar</button>`);
+          } else {
+            actions.push(`<button class="btn btn-sm btn-outline-primary" data-abtest-start="${test.id}">Iniciar</button>`);
+          }
+          actions.push(`<button class="btn btn-sm btn-outline-secondary" data-abtest-delete="${test.id}">Excluir</button>`);
+          return `
+            <tr>
+              <td>${test.id}</td>
+              <td>${test.template_base || '-'}</td>
+              <td>${status.toUpperCase()}</td>
+              <td>
+                <div class="small">${winning}</div>
+                <div class="small text-muted">A/B: ${variantA.conversion_rate ?? 0}/${variantB.conversion_rate ?? 0}</div>
+              </td>
+              <td class="d-flex gap-1">${actions.join(' ')}</td>
+            </tr>
+          `;
+        }).join('');
+      }
+
+      async function loadAbTests() {
+        if (!ensureAuthentication() || !currentCompanyId) {
+          renderAbTests([]);
+          return;
+        }
+        try {
+          const response = await fetch(`/api/abtests?company_id=${encodeURIComponent(currentCompanyId)}`, {
+            headers: { Authorization: `Bearer ${authToken}` },
+          });
+          if (response.status === 401) {
+            setAuthToken('');
+            throw new Error('Sessão expirada. Faça login novamente.');
+          }
+          if (!response.ok) {
+            throw new Error('Falha ao carregar testes A/B.');
+          }
+          const data = await response.json();
+          renderAbTests(data.items || []);
+        } catch (erro) {
+          updateBusinessAlert(erro.message || 'Erro ao carregar testes A/B.', 'danger');
+        }
+      }
+
+      async function submitAbTestForm(event) {
+        event.preventDefault();
+        if (!ensureAuthentication() || !currentCompanyId) {
+          return;
+        }
+        const templateBase = document.getElementById('abtest-template-base').value.trim();
+        const epsilon = Number.parseFloat(document.getElementById('abtest-epsilon').value || '0.1');
+        const variantA = document.getElementById('abtest-variant-a').value.trim();
+        const variantB = document.getElementById('abtest-variant-b').value.trim();
+        const targetMetrics = document.getElementById('abtest-target-metrics').value
+          .split(',')
+          .map((metric) => metric.trim())
+          .filter(Boolean);
+        const payload = {
+          company_id: currentCompanyId,
+          template_base: templateBase,
+          epsilon: Number.isFinite(epsilon) ? epsilon : 0.1,
+          variant_a: variantA ? { template: variantA } : {},
+          variant_b: variantB ? { template: variantB } : {},
+          target_metrics: targetMetrics,
+        };
+        try {
+          const response = await fetch('/api/abtests', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${authToken}`,
+            },
+            body: JSON.stringify(payload),
+          });
+          if (response.status === 401) {
+            setAuthToken('');
+            throw new Error('Sessão expirada. Faça login novamente.');
+          }
+          if (!response.ok) {
+            const errorPayload = await response.json().catch(() => ({}));
+            throw new Error(errorPayload.error || 'Falha ao criar teste.');
+          }
+          document.getElementById('abtest-form').reset();
+          businessElements.abtestFormWrapper.classList.remove('show');
+          updateBusinessAlert('Teste A/B criado com sucesso.', 'success');
+          await loadAbTests();
+        } catch (erro) {
+          updateBusinessAlert(erro.message || 'Erro ao criar teste A/B.', 'danger');
+        }
+      }
+
+      async function abtestAction(testId, action) {
+        if (!ensureAuthentication() || !currentCompanyId) {
+          return;
+        }
+        const url = `/api/abtests/${testId}/${action}`;
+        try {
+          const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${authToken}`,
+            },
+            body: JSON.stringify({ company_id: currentCompanyId }),
+          });
+          if (response.status === 401) {
+            setAuthToken('');
+            throw new Error('Sessão expirada. Faça login novamente.');
+          }
+          if (!response.ok) {
+            const payload = await response.json().catch(() => ({}));
+            throw new Error(payload.error || 'Operação não concluída.');
+          }
+          await loadAbTests();
+        } catch (erro) {
+          updateBusinessAlert(erro.message || 'Erro ao atualizar teste A/B.', 'danger');
+        }
+      }
+
+      async function deleteAbTest(testId) {
+        if (!ensureAuthentication() || !currentCompanyId) {
+          return;
+        }
+        try {
+          const response = await fetch(`/api/abtests/${testId}`, {
+            method: 'DELETE',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${authToken}`,
+            },
+            body: JSON.stringify({ company_id: currentCompanyId }),
+          });
+          if (response.status === 401) {
+            setAuthToken('');
+            throw new Error('Sessão expirada. Faça login novamente.');
+          }
+          if (!response.ok) {
+            const payload = await response.json().catch(() => ({}));
+            throw new Error(payload.error || 'Erro ao excluir teste.');
+          }
+          await loadAbTests();
+        } catch (erro) {
+          updateBusinessAlert(erro.message || 'Não foi possível remover o teste.', 'danger');
+        }
+      }
+
+      async function loadCompliancePolicies() {
+        if (!ensureAuthentication() || !currentCompanyId) {
+          if (businessElements.compliancePolicies) {
+            businessElements.compliancePolicies.textContent = 'Faça login para visualizar as políticas.';
+          }
+          return;
+        }
+        try {
+          const response = await fetch(`/api/compliance/policies?company_id=${encodeURIComponent(currentCompanyId)}`, {
+            headers: { Authorization: `Bearer ${authToken}` },
+          });
+          if (response.status === 401) {
+            setAuthToken('');
+            throw new Error('Sessão expirada. Faça login novamente.');
+          }
+          if (!response.ok) {
+            throw new Error('Falha ao carregar políticas.');
+          }
+          const policies = await response.json();
+          if (businessElements.compliancePolicies) {
+            businessElements.compliancePolicies.textContent = JSON.stringify(policies, null, 2);
+          }
+        } catch (erro) {
+          if (businessElements.compliancePolicies) {
+            businessElements.compliancePolicies.textContent = erro.message || 'Erro ao carregar políticas.';
+          }
+        }
+      }
+
+      async function exportComplianceData(form) {
+        if (!ensureAuthentication() || !currentCompanyId) {
+          return;
+        }
+        const number = form.querySelector('#compliance-export-number').value.trim();
+        const format = form.querySelector('#compliance-export-format').value;
+        try {
+          const response = await fetch('/api/compliance/export_data', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${authToken}`,
+            },
+            body: JSON.stringify({ company_id: currentCompanyId, number, format }),
+          });
+          if (response.status === 401) {
+            setAuthToken('');
+            throw new Error('Sessão expirada. Faça login novamente.');
+          }
+          if (!response.ok) {
+            const payload = await response.json().catch(() => ({}));
+            throw new Error(payload.error || 'Falha ao exportar dados.');
+          }
+          if (format === 'json') {
+            const data = await response.json();
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `compliance_${number}.json`;
+            link.click();
+            URL.revokeObjectURL(url);
+          } else {
+            const blob = await response.blob();
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `compliance_${number}.${format}`;
+            link.click();
+            URL.revokeObjectURL(url);
+          }
+        } catch (erro) {
+          updateBusinessAlert(erro.message || 'Erro ao exportar dados de compliance.', 'danger');
+        }
+      }
+
+      async function deleteComplianceData(form) {
+        if (!ensureAuthentication() || !currentCompanyId) {
+          return;
+        }
+        const number = form.querySelector('#compliance-delete-number').value.trim();
+        try {
+          const response = await fetch('/api/compliance/delete_data', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${authToken}`,
+            },
+            body: JSON.stringify({ company_id: currentCompanyId, number }),
+          });
+          if (response.status === 401) {
+            setAuthToken('');
+            throw new Error('Sessão expirada. Faça login novamente.');
+          }
+          if (!response.ok) {
+            const payload = await response.json().catch(() => ({}));
+            throw new Error(payload.error || 'Falha ao excluir dados.');
+          }
+          updateBusinessAlert('Dados excluídos com sucesso.', 'success');
+        } catch (erro) {
+          updateBusinessAlert(erro.message || 'Erro ao excluir dados de compliance.', 'danger');
+        }
+      }
+
+      async function loadBusinessData() {
+        await Promise.all([loadBusinessInsights(), loadAbTests(), loadCompliancePolicies()]);
+      }
+
       function setAuthToken(token, companyId = currentCompanyId) {
         authToken = token;
         const logoutButton = document.getElementById('btn-logout');
@@ -895,6 +1517,7 @@
             provisionCard.classList.remove('d-none');
           }
           updatePreview();
+          loadBusinessData();
         } else {
           localStorage.removeItem('panel_token');
           localStorage.removeItem('panel_company_id');
@@ -920,6 +1543,7 @@
             analyticsLoginHint.classList.remove('d-none');
           }
           resetAnalyticsUI();
+          resetBusinessUI();
         }
       }
 
@@ -1250,6 +1874,7 @@
         carregarConfig();
         carregarEmpresas();
         carregarAnalytics();
+        loadBusinessData();
       });
       if (analyticsPeriodSelect) {
         analyticsPeriodSelect.addEventListener('change', () => {
@@ -1389,6 +2014,71 @@
         document.getElementById('lista').innerHTML = '';
         document.getElementById('alerta').classList.add('d-none');
       });
+
+      if (businessElements.refreshButton) {
+        businessElements.refreshButton.addEventListener('click', () => evaluateBusinessInsights());
+      }
+      if (businessElements.webhookButton) {
+        businessElements.webhookButton.addEventListener('click', () => {
+          if (!ensureAuthentication()) {
+            return;
+          }
+          const url = prompt('Informe a URL do webhook para este tenant (deixe em branco para remover):');
+          if (url !== null) {
+            evaluateBusinessInsights(url.trim() || null);
+          }
+        });
+      }
+      if (businessElements.abtestOpen && businessElements.abtestFormWrapper) {
+        businessElements.abtestOpen.addEventListener('click', () => {
+          businessElements.abtestFormWrapper.classList.toggle('show');
+        });
+      }
+      if (businessElements.abtestCancel && businessElements.abtestFormWrapper) {
+        businessElements.abtestCancel.addEventListener('click', () => {
+          if (businessElements.abtestForm) {
+            businessElements.abtestForm.reset();
+          }
+          businessElements.abtestFormWrapper.classList.remove('show');
+        });
+      }
+      if (businessElements.abtestForm) {
+        businessElements.abtestForm.addEventListener('submit', submitAbTestForm);
+      }
+      if (businessElements.abtestsTable) {
+        businessElements.abtestsTable.addEventListener('click', (event) => {
+          const target = event.target;
+          if (!(target instanceof HTMLElement)) {
+            return;
+          }
+          const startId = target.getAttribute('data-abtest-start');
+          const stopId = target.getAttribute('data-abtest-stop');
+          const deleteId = target.getAttribute('data-abtest-delete');
+          if (startId) {
+            abtestAction(startId, 'start');
+          } else if (stopId) {
+            abtestAction(stopId, 'stop');
+          } else if (deleteId) {
+            if (confirm('Tem certeza que deseja remover este teste?')) {
+              deleteAbTest(deleteId);
+            }
+          }
+        });
+      }
+      if (businessElements.complianceExportForm) {
+        businessElements.complianceExportForm.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          await exportComplianceData(businessElements.complianceExportForm);
+        });
+      }
+      if (businessElements.complianceDeleteForm) {
+        businessElements.complianceDeleteForm.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          if (confirm('Confirmar exclusão permanente dos dados associados?')) {
+            await deleteComplianceData(businessElements.complianceDeleteForm);
+          }
+        });
+      }
 
       applyToneSelection(document.getElementById('config-tone').value || 'amigavel', { silent: true });
       updateSliderDisplays();

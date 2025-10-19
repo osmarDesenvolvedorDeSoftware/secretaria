@@ -10,6 +10,12 @@ webhook_received_counter = Counter(
     ["company", "status"],
 )
 
+webhook_latency_seconds = Histogram(
+    f"{settings.metrics_namespace}_webhook_latency_seconds",
+    "Latência de processamento dos webhooks",
+    ["company"],
+)
+
 task_latency_histogram = Histogram(
     f"{settings.metrics_namespace}_task_latency_seconds",
     "Latência do processamento de mensagens",
@@ -69,6 +75,12 @@ whaticket_send_retry_total = Counter(
     ["company"],
 )
 
+whaticket_delivery_success_ratio = Gauge(
+    f"{settings.metrics_namespace}_whaticket_delivery_success_ratio",
+    "Taxa de sucesso na entrega ao Whaticket",
+    ["company"],
+)
+
 llm_latency = Histogram(
     f"{settings.metrics_namespace}_llm_latency_seconds",
     "Latência nas chamadas ao LLM",
@@ -84,6 +96,12 @@ llm_errors = Counter(
 llm_prompt_injection_blocked_total = Counter(
     f"{settings.metrics_namespace}_llm_prompt_injection_blocked_total",
     "Total de mensagens bloqueadas por detecção de prompt injection",
+    ["company"],
+)
+
+llm_error_rate_gauge = Gauge(
+    f"{settings.metrics_namespace}_llm_error_rate",
+    "Taxa de erro das chamadas ao LLM (error budget)",
     ["company"],
 )
 
@@ -143,6 +161,7 @@ healthcheck_failures_total = Counter(
 
 __all__ = [
     "webhook_received_counter",
+    "webhook_latency_seconds",
     "task_latency_histogram",
     "queue_gauge",
     "dead_letter_queue_gauge",
@@ -153,8 +172,10 @@ __all__ = [
     "whaticket_errors",
     "whaticket_send_success_total",
     "whaticket_send_retry_total",
+    "whaticket_delivery_success_ratio",
     "llm_latency",
     "llm_errors",
+    "llm_error_rate_gauge",
     "llm_prompt_injection_blocked_total",
     "fallback_transfers_total",
     "sentiment_average_gauge",
