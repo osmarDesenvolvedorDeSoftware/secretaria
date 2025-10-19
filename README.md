@@ -144,6 +144,45 @@ Veja a árvore completa no repositório para entender os módulos de rotas, serv
 * Logs em JSON com `correlation_id`, método, status e duração.
 * Métricas Prometheus para integrar com Grafana/Alertmanager.
 
+## Operação em Produção
+
+### Workers RQ sob supervisão
+
+Use um supervisor de processos para manter múltiplos workers ativos. Exemplos:
+
+```bash
+# Supervisor (arquivo pronto em supervisord.conf)
+supervisord -c supervisord.conf
+
+# PM2 executando 3 workers Python
+pm2 start "python -m rq worker default" --name secretaria-worker --instances 3 --interpreter python3
+```
+
+### Monitorar fila padrão e dead-letter
+
+```bash
+rq info --url ${REDIS_URL} default dead_letter
+rq info --url ${REDIS_URL} dead_letter --interval 5  # modo watch para DLQ
+```
+
+### Rotação de segredos
+
+```bash
+make rotate-secrets  # atualiza tokens do painel, Whaticket e LLM
+```
+
+O script grava novas credenciais em `.env` e no Redis, preservando backups com sufixo `*.bak`.
+
+### Métricas Prometheus em tempo real
+
+```bash
+curl -s http://localhost:8080/metrics | grep secretaria_
+watch -n 5 'curl -s http://localhost:8080/metrics | grep "queue_size\|dead_letter"'
+```
+
+Integre o endpoint `/metrics` com Prometheus/Grafana para alarmes de latência (`secretaria_task_latency_seconds`), retries
+(`secretaria_whaticket_send_retry_total`) e tamanho da DLQ (`secretaria_dead_letter_queue_size`).
+
 ## Testes
 
 ```bash

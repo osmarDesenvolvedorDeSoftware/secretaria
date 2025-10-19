@@ -18,6 +18,7 @@ from .config import settings
 from .metrics import (
     llm_errors,
     llm_latency,
+    dead_letter_queue_gauge,
     queue_gauge,
     redis_memory_usage_gauge,
     task_latency_histogram,
@@ -109,6 +110,16 @@ def init_app() -> Flask:
             elif isinstance(count_attr, int):
                 queue_size = count_attr
         queue_gauge.set(queue_size)
+
+        dead_letter_obj = getattr(app, "dead_letter_queue", None)
+        dead_letter_size = 0
+        if dead_letter_obj is not None:
+            dlq_count_attr = getattr(dead_letter_obj, "count", None)
+            if callable(dlq_count_attr):
+                dead_letter_size = dlq_count_attr()
+            elif isinstance(dlq_count_attr, int):
+                dead_letter_size = dlq_count_attr
+        dead_letter_queue_gauge.set(dead_letter_size)
 
         redis_client = getattr(app, "redis", None)
         if redis_client is not None:
