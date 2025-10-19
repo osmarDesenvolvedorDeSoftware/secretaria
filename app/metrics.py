@@ -31,6 +31,11 @@ redis_memory_usage_gauge = Gauge(
     ["type"],
 )
 
+active_workers_gauge = Gauge(
+    f"{settings.metrics_namespace}_active_workers",
+    "Quantidade de workers RQ ativos registrados",
+)
+
 whaticket_latency = Histogram(
     f"{settings.metrics_namespace}_whaticket_latency_seconds",
     "Latência de envio para Whaticket",
@@ -78,6 +83,7 @@ __all__ = [
     "queue_gauge",
     "dead_letter_queue_gauge",
     "redis_memory_usage_gauge",
+    "active_workers_gauge",
     "whaticket_latency",
     "whaticket_errors",
     "whaticket_send_success_total",

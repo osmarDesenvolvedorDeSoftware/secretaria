@@ -1,0 +1,29 @@
+groups:
+  - name: secretaria-operational
+    rules:
+      - alert: DeadLetterQueueBacklog
+        expr: secretaria_dead_letter_queue_size > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Mensagens acumuladas na fila de dead-letter
+          description: A fila dead-letter possui itens há mais de 5 minutos.
+
+      - alert: RedisMemoryHigh
+        expr: secretaria_redis_memory_usage_bytes{type="used"} > secretaria_redis_memory_usage_bytes{type="warning_threshold"}
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Consumo elevado de memória no Redis
+          description: O consumo de memória do Redis excedeu o limite configurado de aviso.
+
+      - alert: RqWorkerOffline
+        expr: secretaria_active_workers < 1
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Nenhum worker RQ ativo detectado
+          description: Prometheus não detecta workers RQ ativos nos últimos 2 minutos.

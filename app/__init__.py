@@ -1,24 +1,29 @@
 from __future__ import annotations
 
 import logging
+import logging.config
+import os
 import time
 import uuid
 from contextlib import contextmanager
 from typing import Generator
 
+from pathlib import Path
+
 import structlog
 from flask import Flask, g, request
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from redis import Redis
-from rq import Queue
+from rq import Queue, Worker
 from sqlalchemy import create_engine
 from sqlalchemy.orm import scoped_session, sessionmaker
 
 from .config import settings
 from .metrics import (
+    active_workers_gauge,
+    dead_letter_queue_gauge,
     llm_errors,
     llm_latency,
-    dead_letter_queue_gauge,
     queue_gauge,
     redis_memory_usage_gauge,
     task_latency_histogram,
@@ -33,6 +38,28 @@ LOGGER = structlog.get_logger()
 
 
 def configure_logging() -> None:
+    config_path = Path(os.getenv("LOGGING_CONFIG", "logging.conf"))
+    log_defaults = {
+        "logfilename": os.getenv("APP_LOG_FILE", "/var/log/secretaria/app.log"),
+    }
+
+    try:
+        Path(log_defaults["logfilename"]).parent.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        logging.getLogger(__name__).warning(
+            "unable_to_create_log_directory",
+            directory=log_defaults["logfilename"],
+        )
+
+    if config_path.exists():
+        logging.config.fileConfig(
+            config_path,
+            disable_existing_loggers=False,
+            defaults=log_defaults,
+        )
+    else:
+        logging.basicConfig(level=logging.INFO)
+
     timestamper = structlog.processors.TimeStamper(fmt="iso")
 
     structlog.configure(
@@ -49,8 +76,6 @@ def configure_logging() -> None:
         wrapper_class=structlog.stdlib.BoundLogger,
         cache_logger_on_first_use=True,
     )
-
-    logging.basicConfig(level=logging.INFO)
 
 
 def init_app() -> Flask:
@@ -90,6 +115,22 @@ def init_app() -> Flask:
     def add_response_headers(response):
         duration = time.time() - getattr(g, "start_time", time.time())
         response.headers["X-Correlation-ID"] = getattr(g, "correlation_id", "")
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            "default-src 'self'; img-src 'self' data:; script-src 'self'; style-src 'self' 'unsafe-inline'",
+        )
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        response.headers.setdefault(
+            "Permissions-Policy",
+            "geolocation=(), microphone=(), camera=(), fullscreen=(self)",
+        )
+        if request.is_secure:
+            response.headers.setdefault(
+                "Strict-Transport-Security",
+                "max-age=31536000; includeSubDomains; preload",
+            )
         LOGGER.info(
             "request_completed",
             path=request.path,
@@ -139,6 +180,13 @@ def init_app() -> Flask:
             redis_memory_usage_gauge.labels("critical_threshold").set(
                 float(settings.redis_memory_critical_bytes)
             )
+            try:
+                worker_count = len(Worker.all(connection=redis_client))  # type: ignore[arg-type]
+            except Exception:
+                worker_count = 0
+            active_workers_gauge.set(worker_count)
+        else:
+            active_workers_gauge.set(0)
         return app.response_class(generate_latest(), mimetype=CONTENT_TYPE_LATEST)
 
     from app.routes.projects import bp as projects_bp
