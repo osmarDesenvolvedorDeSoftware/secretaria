@@ -14,18 +14,78 @@
     <div class="container">
       <div class="d-flex justify-content-between align-items-center mb-4">
         <h2 class="mb-0">Meus Projetos</h2>
-        <button id="btn-refresh" class="btn btn-primary btn-sm">Atualizar</button>
+        <div>
+          <button id="btn-logout" class="btn btn-outline-secondary btn-sm me-2 d-none">Sair</button>
+          <button id="btn-refresh" class="btn btn-primary btn-sm">Atualizar</button>
+        </div>
       </div>
       <div id="alerta" class="alert alert-warning d-none" role="alert"></div>
+
+      <div id="login-card" class="card shadow-sm mb-4 d-none">
+        <div class="card-body">
+          <h5 class="card-title">Autenticação necessária</h5>
+          <p class="card-text">Informe a senha operacional definida no ambiente para visualizar o painel.</p>
+          <form id="form-login" class="row g-3">
+            <div class="col-md-6">
+              <label for="senha-painel" class="form-label">Senha</label>
+              <input type="password" class="form-control" id="senha-painel" autocomplete="current-password" required>
+            </div>
+            <div class="col-md-12">
+              <button type="submit" class="btn btn-success">Entrar</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
       <div id="lista" class="row g-3"></div>
     </div>
     <script>
+      let authToken = localStorage.getItem('panel_token') || '';
+
+      function setAuthToken(token) {
+        authToken = token;
+        const logoutButton = document.getElementById('btn-logout');
+        if (authToken) {
+          localStorage.setItem('panel_token', authToken);
+          logoutButton.classList.remove('d-none');
+          document.getElementById('login-card').classList.add('d-none');
+        } else {
+          localStorage.removeItem('panel_token');
+          logoutButton.classList.add('d-none');
+          document.getElementById('login-card').classList.remove('d-none');
+        }
+      }
+
+      function ensureAuthentication() {
+        if (!authToken) {
+          document.getElementById('login-card').classList.remove('d-none');
+          return false;
+        }
+        document.getElementById('login-card').classList.add('d-none');
+        return true;
+      }
+
       async function carregar() {
         const alerta = document.getElementById('alerta');
         alerta.classList.add('d-none');
         alerta.textContent = '';
+
+        if (!ensureAuthentication()) {
+          alerta.textContent = 'Faça login para visualizar os projetos.';
+          alerta.classList.remove('d-none');
+          return;
+        }
+
         try {
-          const resposta = await fetch('/projects/');
+          const resposta = await fetch('/projects/', {
+            headers: {
+              Authorization: `Bearer ${authToken}`,
+            },
+          });
+          if (resposta.status === 401) {
+            setAuthToken('');
+            throw new Error('Sessão expirada. Faça login novamente.');
+          }
           if (!resposta.ok) {
             throw new Error('Não foi possível carregar os projetos.');
           }
@@ -60,6 +120,47 @@
       }
 
       document.getElementById('btn-refresh').addEventListener('click', carregar);
+      document.getElementById('form-login').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const senha = document.getElementById('senha-painel').value.trim();
+        const alerta = document.getElementById('alerta');
+        alerta.classList.add('d-none');
+        alerta.textContent = '';
+        try {
+          const resposta = await fetch('/auth/token', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ password: senha }),
+          });
+          if (!resposta.ok) {
+            if (resposta.status === 401) {
+              throw new Error('Senha inválida.');
+            }
+            throw new Error('Não foi possível autenticar.');
+          }
+          const data = await resposta.json();
+          if (!data.access_token) {
+            throw new Error('Resposta inesperada do servidor.');
+          }
+          setAuthToken(data.access_token);
+          document.getElementById('senha-painel').value = '';
+          await carregar();
+        } catch (erro) {
+          alerta.textContent = erro.message;
+          alerta.classList.remove('d-none');
+        }
+      });
+
+      document.getElementById('btn-logout').addEventListener('click', (event) => {
+        event.preventDefault();
+        setAuthToken('');
+        document.getElementById('lista').innerHTML = '';
+        document.getElementById('alerta').classList.add('d-none');
+      });
+
+      setAuthToken(authToken);
       carregar();
     </script>
   </body>

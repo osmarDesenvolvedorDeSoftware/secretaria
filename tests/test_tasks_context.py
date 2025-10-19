@@ -52,6 +52,7 @@ def test_set_context_truncates_and_sets_ttl(monkeypatch):
     service = TaskService(redis_client, DummySessionFactory(), DummyQueue())
 
     monkeypatch.setattr(settings, "context_max_messages", 3)
+    monkeypatch.setattr(settings, "context_ttl", 120)
     monkeypatch.setattr(settings, "context_ttl_seconds", 120)
 
     messages = [{"role": "user", "body": f"msg-{i}"} for i in range(6)]

@@ -1,19 +1,22 @@
-.PHONY: dev migrate upgrade worker test up down install
+.PHONY: dev migrate upgrade worker test up down install revision ci-migrate
 
 export FLASK_APP=run.py
 
 install:
-	python3.11 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt
+        python3.11 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt
 
 dev:
-	alembic upgrade head
-	flask --app run.py --debug run --host=0.0.0.0 --port=8080
+        alembic upgrade head
+        flask --app run.py --debug run --host=0.0.0.0 --port=8080
 
 migrate:
-	alembic revision --autogenerate -m "manual"
+        alembic upgrade head
+
+revision:
+        alembic revision --autogenerate -m "manual"
 
 upgrade:
-	alembic upgrade head
+        alembic upgrade head
 
 worker:
 	alembic upgrade head
@@ -26,4 +29,7 @@ down:
 	docker compose -f docker/docker-compose.yml down -v
 
 test:
-	pytest -v --maxfail=1 --disable-warnings --cov=app --cov-report=term-missing
+        pytest -v --maxfail=1 --disable-warnings --cov=app --cov-report=term-missing
+
+ci-migrate:
+        alembic upgrade head || alembic downgrade -1

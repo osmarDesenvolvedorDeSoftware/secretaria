@@ -91,6 +91,12 @@ class DummyRedis:
         self.expiry[key] = ttl
         return True
 
+    def info(self, section: str | None = None):
+        if section == "memory":
+            used_memory = sum(len(str(value)) for value in self.storage.values())
+            return {"used_memory": used_memory, "maxmemory": 0}
+        return {}
+
     def ttl(self, key: str):
         if key in self.expiry:
             return self.expiry[key]
@@ -124,7 +130,13 @@ class DummyQueue:
         func = args[0]
         job_args = args[1:]
         self.enqueued.append((func, job_args, kwargs))
-        return {"id": len(self.enqueued)}
+
+        class _Job:
+            def __init__(self, job_id: int, meta: dict[str, Any]):
+                self.id = str(job_id)
+                self.meta = meta
+
+        return _Job(len(self.enqueued), kwargs.get("meta", {}))
 
     def count(self):
         return len(self.enqueued)
@@ -139,6 +151,13 @@ def app(monkeypatch) -> Generator[Flask, None, None]:
     monkeypatch.setattr(app_init, "Queue", DummyQueue)
     monkeypatch.setattr(tasks_module, "Queue", DummyQueue)
     config_settings.database_url = "sqlite+pysqlite:///:memory:"
+    config_settings.panel_password = "painel-teste"
+    config_settings.panel_jwt_secret = "painel-secret"
+    config_settings.panel_token_ttl_seconds = 3600
+    config_settings.context_ttl = 600
+    config_settings.context_ttl_seconds = 600
+    config_settings.rate_limit_ttl = 60
+    config_settings.rate_limit_ttl_seconds = 60
     test_app = init_app()
     test_app.redis = DummyRedis()  # type: ignore[attr-defined]
     test_app.task_queue = DummyQueue()  # type: ignore[attr-defined]

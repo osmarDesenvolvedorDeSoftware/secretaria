@@ -12,6 +12,7 @@ def configure_retries(monkeypatch):
     from app.config import settings
 
     monkeypatch.setattr(settings, "context_max_messages", 5)
+    monkeypatch.setattr(settings, "context_ttl", 600)
     monkeypatch.setattr(settings, "context_ttl_seconds", 600)
     monkeypatch.setattr(settings, "rq_retry_delays", ())
     monkeypatch.setattr(settings, "rq_retry_max_attempts", 0)

@@ -25,6 +25,14 @@ def _bool(name: str, default: bool = False) -> bool:
     return value.lower() in {"1", "true", "yes", "on"}
 
 
+def _int_with_fallback(primary: str, fallback: str, default: int) -> int:
+    if primary in os.environ and os.environ[primary] != "":
+        return int(os.environ[primary])
+    if fallback in os.environ and os.environ[fallback] != "":
+        return int(os.environ[fallback])
+    return default
+
+
 @dataclass
 class Config:
     shared_secret: str = os.getenv("SHARED_SECRET", "")
@@ -36,7 +44,6 @@ class Config:
     gemini_api_key: str = os.getenv("GEMINI_API_KEY", "")
     redis_url: str = os.getenv("REDIS_URL", "redis://redis:6379/0")
     database_url: str = os.getenv("DATABASE_URL", "postgresql+psycopg2://postgres:postgres@postgres:5432/postgres")
-    context_ttl_seconds: int = _int("CONTEXT_TTL_SECONDS", 600)
     context_max_messages: int = _int("CONTEXT_MAX_MESSAGES", 5)
     request_timeout_seconds: float = _float("REQUEST_TIMEOUT_SECONDS", 10.0)
     llm_timeout_seconds: float = _float("LLM_TIMEOUT_SECONDS", 30.0)
@@ -49,15 +56,35 @@ class Config:
     whaticket_retry_attempts: int = _int("WHATICKET_RETRY_ATTEMPTS", 3)
     whaticket_retry_backoff_seconds: int = _int("WHATICKET_RETRY_BACKOFF_SECONDS", 5)
     queue_name: str = os.getenv("RQ_QUEUE", "default")
+    dead_letter_queue_name: str = os.getenv("RQ_DEAD_LETTER_QUEUE", "dead_letter")
+    dead_letter_job_timeout: int = _int("DEAD_LETTER_JOB_TIMEOUT", 60)
+    dead_letter_result_ttl: int = _int("DEAD_LETTER_RESULT_TTL", 86400)
     rq_retry_delays: tuple[int, ...] = field(default_factory=lambda: (5, 15, 45, 90))
     rq_retry_max_attempts: int = _int("RQ_RETRY_MAX_ATTEMPTS", 5)
     metrics_namespace: str = os.getenv("METRICS_NAMESPACE", "secretaria")
     enable_jwt_login: bool = field(default_factory=lambda: bool(os.getenv("WHATICKET_JWT_EMAIL") and os.getenv("WHATICKET_JWT_PASSWORD")))
     transfer_to_human_message: str = os.getenv("TRANSFER_TO_HUMAN_MESSAGE", "Estamos encaminhando seu atendimento para um agente humano.")
+    redis_memory_warning_bytes: int = _int("REDIS_MEMORY_WARNING_BYTES", 512 * 1024 * 1024)
+    redis_memory_critical_bytes: int = _int("REDIS_MEMORY_CRITICAL_BYTES", 768 * 1024 * 1024)
+    panel_password: str = os.getenv("PANEL_PASSWORD", "")
+    panel_jwt_secret: str = os.getenv("PANEL_JWT_SECRET", "change-me")
+    panel_token_ttl_seconds: int = _int("PANEL_TOKEN_TTL_SECONDS", 3600)
+    context_ttl: int = field(init=False)
+    context_ttl_seconds: int = field(init=False)
+    rate_limit_ttl: int = field(init=False)
+    rate_limit_ttl_seconds: int = field(init=False)
 
     @property
     def llm_circuit_breaker_reset(self) -> timedelta:
         return timedelta(seconds=self.llm_circuit_breaker_reset_seconds)
+
+    def __post_init__(self) -> None:
+        context_ttl = _int_with_fallback("CONTEXT_TTL", "CONTEXT_TTL_SECONDS", 600)
+        rate_limit_ttl = _int_with_fallback("RATE_LIMIT_TTL", "RATE_LIMIT_WINDOW_SECONDS", 60)
+        self.context_ttl = context_ttl
+        self.context_ttl_seconds = context_ttl
+        self.rate_limit_ttl = rate_limit_ttl
+        self.rate_limit_ttl_seconds = rate_limit_ttl
 
 
 settings = Config()

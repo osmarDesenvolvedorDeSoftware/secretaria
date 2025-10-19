@@ -20,6 +20,12 @@ queue_gauge = Gauge(
     "Tamanho atual da fila RQ",
 )
 
+redis_memory_usage_gauge = Gauge(
+    f"{settings.metrics_namespace}_redis_memory_usage_bytes",
+    "Uso de memória do Redis em bytes",
+    ["type"],
+)
+
 whaticket_latency = Histogram(
     f"{settings.metrics_namespace}_whaticket_latency_seconds",
     "Latência de envio para Whaticket",
@@ -65,6 +71,7 @@ __all__ = [
     "webhook_received_counter",
     "task_latency_histogram",
     "queue_gauge",
+    "redis_memory_usage_gauge",
     "whaticket_latency",
     "whaticket_errors",
     "whaticket_send_success_total",
