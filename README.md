@@ -1,6 +1,6 @@
 # Secretaria Virtual Whaticket
 
-[![Release](https://img.shields.io/badge/version-v2.3-blue.svg)](docs/release_v2.3.md)
+[![Release](https://img.shields.io/badge/version-v2.4-blue.svg)](docs/release_v2.4.md)
 
 Arquitetura pronta para produção para uma secretária virtual integrada ao Whaticket com Flask, Redis, RQ e PostgreSQL.
 
@@ -14,6 +14,7 @@ Arquitetura pronta para produção para uma secretária virtual integrada ao Wha
 - 📄 [Documentação de release v2.1](docs/release_v2.1.md)
 - 📄 [Documentação de release v2.2](docs/release_v2.2.md)
 - 📄 [Documentação de release v2.3](docs/release_v2.3.md)
+- 📄 [Documentação de release v2.4](docs/release_v2.4.md)
 
 * **Multi-tenancy completo** com isolamento por empresa em banco, Redis, filas RQ e JWT multiempresa.
 * **Provisionamento automático** via `/api/tenants/provision` com criação de planos, assinaturas, schemas e redis dedicados.
@@ -30,6 +31,7 @@ Arquitetura pronta para produção para uma secretária virtual integrada ao Wha
 * **Agenda Inteligente** com integração Cal.com multi-tenant, webhook assinado e orquestração direta via WhatsApp.
 * **Lembretes e reagendamento inteligente** com confirmações proativas, métricas Prometheus e painel com taxa de presença.
 * **IA de otimização de agenda** com previsão de no-show, reagendamento automático e painel “Insights de Agenda”.
+* **Follow-up automático pós-atendimento** com mensagens no WhatsApp, coleta de feedback estruturado e reengajamento direto pelo painel.
 
 ## Requisitos
 
@@ -87,6 +89,12 @@ Arquitetura pronta para produção para uma secretária virtual integrada ao Wha
 1. Lembretes automáticos 24h e 1h antes do início com botões de confirmação e opção de reagendar direto pelo WhatsApp.
 2. Fluxo de reagendamento inteligente reutilizando a disponibilidade Cal.com, atualizando status antigos e registrando auditoria e métricas.
 3. Detecção de no-show com feedback automático, taxa de presença no painel, filtros rápidos e ação “Enviar lembrete agora”.
+
+### v2.4 – Follow-up Automático Pós-Atendimento
+
+1. Follow-up via WhatsApp agendado uma hora após o término da reunião com botões interativos para reengajamento rápido.
+2. Interpretação automática de respostas positivas/negativas, criação de `FeedbackEvent` para comentários livres e auditoria em `AuditLog`.
+3. Novo painel “Pós-Atendimento” com taxa de resposta, reenviar follow-up e gráfico de satisfação de 30 dias, além de métricas Prometheus dedicadas (`appointment_followups_*`).
 
 ## Comandos Principais
 

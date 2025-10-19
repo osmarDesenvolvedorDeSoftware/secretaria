@@ -587,6 +587,50 @@
               </form>
             </div>
           </div>
+          <div id="followup-alert" class="alert alert-info d-none mt-4" role="alert"></div>
+          <div id="followup-card" class="card shadow-sm mt-3 d-none">
+            <div class="card-body">
+              <div class="d-flex flex-wrap justify-content-between align-items-start gap-3">
+                <div class="flex-fill" style="min-width: 220px;">
+                  <h5 class="card-title mb-1">Pós-Atendimento</h5>
+                  <p class="text-muted small mb-2">Taxa de resposta: <span id="followup-response-rate">-</span></p>
+                  <div class="btn-group btn-group-sm mb-2" role="group" id="followup-filter-group">
+                    <button type="button" class="btn btn-outline-primary active" data-followup-filter="all">Todos</button>
+                    <button type="button" class="btn btn-outline-primary" data-followup-filter="positive">Positivos</button>
+                    <button type="button" class="btn btn-outline-primary" data-followup-filter="negative">Negativos</button>
+                    <button type="button" class="btn btn-outline-primary" data-followup-filter="pending">Pendentes</button>
+                  </div>
+                  <div class="d-flex flex-wrap gap-2 small">
+                    <span class="badge bg-success-subtle text-success">👍 <span id="followup-count-positive">0</span></span>
+                    <span class="badge bg-danger-subtle text-danger">👎 <span id="followup-count-negative">0</span></span>
+                    <span class="badge bg-secondary-subtle text-secondary">💬 <span id="followup-count-feedback">0</span></span>
+                    <span class="badge bg-warning-subtle text-warning text-dark">⏳ <span id="followup-count-pending">0</span></span>
+                  </div>
+                </div>
+                <div class="flex-grow-1" style="min-width: 240px; max-width: 360px;">
+                  <canvas id="followup-chart" height="160"></canvas>
+                </div>
+              </div>
+              <div class="table-responsive mt-3">
+                <table class="table table-sm align-middle">
+                  <thead class="table-light">
+                    <tr>
+                      <th>Cliente</th>
+                      <th>Enviado</th>
+                      <th>Status</th>
+                      <th>Próximo envio</th>
+                      <th>Feedback</th>
+                      <th class="text-end">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody id="followup-table"></tbody>
+                </table>
+              </div>
+              <div id="followup-empty" class="alert alert-warning d-none mt-3" role="alert">
+                Nenhum follow-up registrado para os filtros selecionados.
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -668,10 +712,26 @@
           duration: document.getElementById('agenda-duration'),
           title: document.getElementById('agenda-title'),
         },
+        followupCard: document.getElementById('followup-card'),
+        followupAlert: document.getElementById('followup-alert'),
+        followupFilterGroup: document.getElementById('followup-filter-group'),
+        followupTable: document.getElementById('followup-table'),
+        followupEmpty: document.getElementById('followup-empty'),
+        followupRate: document.getElementById('followup-response-rate'),
+        followupCounts: {
+          positive: document.getElementById('followup-count-positive'),
+          negative: document.getElementById('followup-count-negative'),
+          feedback: document.getElementById('followup-count-feedback'),
+          pending: document.getElementById('followup-count-pending'),
+        },
+        followupChart: document.getElementById('followup-chart'),
       };
       let agendaAppointments = [];
       let agendaInsightsChart = null;
       let agendaQuickFilter = 'all';
+      let followupData = { appointments: [], counts: {}, history: [], responseRate: 0 };
+      let followupStatusFilter = 'all';
+      let followupChart = null;
       let businessNpsChart = null;
       const toneInputs = document.querySelectorAll('#tone-group input[type="radio"]');
       const formalityRange = document.getElementById('config-formality');
@@ -717,6 +777,37 @@
           return names[normalized];
         }
         return 'Horário';
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
+      }
+
+      function truncateText(value, maxLength = 80) {
+        const text = String(value ?? '').trim();
+        if (!text) {
+          return '';
+        }
+        if (text.length <= maxLength) {
+          return text;
+        }
+        return `${text.slice(0, maxLength - 1)}…`;
+      }
+
+      function formatDateTime(value) {
+        if (!value) {
+          return '—';
+        }
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) {
+          return '—';
+        }
+        return date.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
       }
 
       function statusBadge(label, status) {
@@ -1273,6 +1364,39 @@
             .querySelectorAll('[data-agenda-filter]')
             .forEach((button) => button.classList.toggle('active', button.dataset.agendaFilter === 'all'));
         }
+        resetFollowupUI();
+      }
+
+      function resetFollowupUI() {
+        if (agendaElements.followupAlert) {
+          agendaElements.followupAlert.classList.add('d-none');
+          agendaElements.followupAlert.textContent = '';
+        }
+        if (agendaElements.followupRate) {
+          agendaElements.followupRate.textContent = '-';
+        }
+        const counts = agendaElements.followupCounts || {};
+        Object.keys(counts).forEach((key) => {
+          const element = counts[key];
+          if (element) {
+            element.textContent = '0';
+          }
+        });
+        if (agendaElements.followupTable) {
+          agendaElements.followupTable.innerHTML = '';
+        }
+        if (agendaElements.followupEmpty) {
+          agendaElements.followupEmpty.classList.add('d-none');
+        }
+        if (agendaElements.followupCard) {
+          agendaElements.followupCard.classList.add('d-none');
+        }
+        if (followupChart) {
+          followupChart.destroy();
+          followupChart = null;
+        }
+        followupData = { appointments: [], counts: {}, history: [], responseRate: 0 };
+        followupStatusFilter = 'all';
       }
 
       function updateAttendanceRateDisplay(rate) {
@@ -1410,6 +1534,162 @@
         });
       }
 
+      function updateFollowupSummary(summary = {}) {
+        if (!agendaElements.followupRate) {
+          return;
+        }
+        const rate = Number(summary.responseRate ?? summary.response_rate ?? 0);
+        agendaElements.followupRate.textContent = Number.isFinite(rate) && rate >= 0
+          ? `${(rate * 100).toFixed(1)}%`
+          : '-';
+        const counts = summary.counts || {};
+        const elements = agendaElements.followupCounts || {};
+        if (elements.positive) {
+          elements.positive.textContent = Number(counts.positive || 0).toLocaleString('pt-BR');
+        }
+        if (elements.negative) {
+          elements.negative.textContent = Number(counts.negative || 0).toLocaleString('pt-BR');
+        }
+        if (elements.feedback) {
+          elements.feedback.textContent = Number(counts.feedback || 0).toLocaleString('pt-BR');
+        }
+        if (elements.pending) {
+          elements.pending.textContent = Number(counts.pending || 0).toLocaleString('pt-BR');
+        }
+      }
+
+      function renderFollowupTable() {
+        if (!agendaElements.followupTable) {
+          return;
+        }
+        const items = Array.isArray(followupData.appointments) ? followupData.appointments : [];
+        if (!items.length) {
+          agendaElements.followupTable.innerHTML = '';
+          if (agendaElements.followupEmpty) {
+            agendaElements.followupEmpty.classList.remove('d-none');
+          }
+          return;
+        }
+        agendaElements.followupTable.innerHTML = items
+          .map((item) => {
+            const clientName = escapeHtml(item.client_name || 'Cliente');
+            const clientPhone = escapeHtml(item.client_phone || '');
+            const sentLabel = formatDateTime(item.followup_sent_at);
+            const nextLabel = formatDateTime(item.followup_next_scheduled);
+            const response = String(item.followup_response || '').toLowerCase();
+            let statusIcon = '⏳';
+            let statusLabel = 'Pendente';
+            let statusClass = 'text-warning';
+            if (response === 'positive') {
+              statusIcon = '👍';
+              statusLabel = 'Positivo';
+              statusClass = 'text-success';
+            } else if (response === 'negative') {
+              statusIcon = '👎';
+              statusLabel = 'Negativo';
+              statusClass = 'text-danger';
+            } else if (response === 'feedback') {
+              statusIcon = '💬';
+              statusLabel = 'Feedback';
+              statusClass = 'text-info';
+            }
+            const feedbackText = String(item.followup_feedback || '').trim();
+            const feedbackSnippet = feedbackText ? truncateText(feedbackText, 80) : '';
+            const feedbackCell = feedbackSnippet
+              ? `<span class="text-muted small" title="${escapeHtml(feedbackText)}">${escapeHtml(feedbackSnippet)}</span>`
+              : '<span class="text-muted">—</span>';
+            const allowResend = Boolean(item.allow_followup);
+            const resendDisabled = !allowResend || response === 'negative';
+            const buttonClass = resendDisabled ? 'btn btn-outline-secondary btn-sm' : 'btn btn-outline-primary btn-sm';
+            const buttonTitle = resendDisabled ? 'Follow-up indisponível' : 'Reenviar follow-up';
+            const buttonState = resendDisabled ? 'disabled' : '';
+            return `
+              <tr>
+                <td>
+                  <div class="fw-semibold">${clientName}</div>
+                  <div class="text-muted small">${clientPhone || '—'}</div>
+                </td>
+                <td>${sentLabel}</td>
+                <td><span class="fw-semibold ${statusClass}">${statusIcon} ${statusLabel}</span></td>
+                <td>${nextLabel}</td>
+                <td>${feedbackCell}</td>
+                <td class="text-end">
+                  <button type="button" class="${buttonClass}" data-followup-resend="${Number(item.id)}" title="${buttonTitle}" ${buttonState}>
+                    Reenviar follow-up
+                  </button>
+                </td>
+              </tr>
+            `;
+          })
+          .join('');
+        if (agendaElements.followupEmpty) {
+          agendaElements.followupEmpty.classList.add('d-none');
+        }
+      }
+
+      function renderFollowupChart(history = []) {
+        const canvas = agendaElements.followupChart;
+        if (!canvas) {
+          return;
+        }
+        if (followupChart) {
+          followupChart.destroy();
+          followupChart = null;
+        }
+        if (!history.length) {
+          const context = canvas.getContext('2d');
+          if (context) {
+            context.clearRect(0, 0, canvas.width, canvas.height);
+          }
+          return;
+        }
+        const labels = history.map((item) => {
+          if (item.date) {
+            const date = new Date(item.date);
+            if (!Number.isNaN(date.getTime())) {
+              return date.toLocaleDateString('pt-BR');
+            }
+            return String(item.date);
+          }
+          return '';
+        });
+        const positives = history.map((item) => Number(item.positive || 0));
+        const negatives = history.map((item) => Number(item.negative || 0));
+        followupChart = new Chart(canvas.getContext('2d'), {
+          type: 'bar',
+          data: {
+            labels,
+            datasets: [
+              {
+                label: 'Positivos',
+                data: positives,
+                backgroundColor: '#198754',
+              },
+              {
+                label: 'Negativos',
+                data: negatives,
+                backgroundColor: '#dc3545',
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+              x: { stacked: true },
+              y: {
+                beginAtZero: true,
+                stacked: true,
+                ticks: { precision: 0 },
+              },
+            },
+            plugins: {
+              legend: { display: true, position: 'bottom' },
+            },
+          },
+        });
+      }
+
       function renderAgendaInsights(data = {}) {
         if (!agendaElements.insightsCard) {
           return;
@@ -1500,6 +1780,7 @@
           agendaAppointments = Array.isArray(data.appointments) ? data.appointments : [];
           updateAttendanceRateDisplay(Number(data.attendance_rate ?? 0));
           renderAgendaTable();
+          await loadFollowups(followupStatusFilter);
           await loadAgendaInsights();
         } catch (erro) {
           resetAgendaUI();
@@ -1507,6 +1788,103 @@
             agendaElements.alertBox.className = 'alert alert-danger';
             agendaElements.alertBox.textContent = erro.message || 'Falha ao carregar a agenda.';
             agendaElements.alertBox.classList.remove('d-none');
+          }
+        }
+      }
+
+      async function loadFollowups(status = followupStatusFilter) {
+        if (!ensureAuthentication() || !currentCompanyId) {
+          resetFollowupUI();
+          return;
+        }
+        followupStatusFilter = status || 'all';
+        if (agendaElements.followupAlert) {
+          agendaElements.followupAlert.classList.add('d-none');
+          agendaElements.followupAlert.textContent = '';
+        }
+        if (agendaElements.followupFilterGroup) {
+          agendaElements.followupFilterGroup
+            .querySelectorAll('button[data-followup-filter]')
+            .forEach((button) => button.classList.toggle('active', (button.dataset.followupFilter || 'all') === followupStatusFilter));
+        }
+        try {
+          const response = await fetch(
+            `/api/agenda/followups?company_id=${encodeURIComponent(currentCompanyId)}&status=${encodeURIComponent(followupStatusFilter)}`,
+            { headers: { Authorization: `Bearer ${authToken}` } },
+          );
+          if (response.status === 401) {
+            setAuthToken('');
+            throw new Error('Sessão expirada. Faça login novamente.');
+          }
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            throw new Error(data.error || 'Não foi possível carregar os follow-ups.');
+          }
+          followupData = {
+            appointments: Array.isArray(data.appointments) ? data.appointments : [],
+            counts: data.counts || {},
+            history: Array.isArray(data.history) ? data.history : [],
+            responseRate: Number(data.response_rate ?? 0),
+          };
+          updateFollowupSummary(followupData);
+          renderFollowupTable();
+          renderFollowupChart(followupData.history);
+          if (agendaElements.followupCard) {
+            const hasContent = (followupData.counts?.total || 0) > 0 || followupData.appointments.length > 0;
+            agendaElements.followupCard.classList.toggle('d-none', !hasContent);
+          }
+        } catch (erro) {
+          resetFollowupUI();
+          if (agendaElements.followupAlert) {
+            agendaElements.followupAlert.className = 'alert alert-danger mt-4';
+            agendaElements.followupAlert.textContent = erro.message || 'Falha ao carregar os follow-ups.';
+            agendaElements.followupAlert.classList.remove('d-none');
+          }
+        }
+      }
+
+      async function resendFollowup(appointmentId, triggerButton) {
+        if (!ensureAuthentication() || !currentCompanyId) {
+          return;
+        }
+        if (agendaElements.followupAlert) {
+          agendaElements.followupAlert.classList.add('d-none');
+          agendaElements.followupAlert.textContent = '';
+        }
+        if (triggerButton) {
+          triggerButton.disabled = true;
+        }
+        try {
+          const response = await fetch(`/api/agenda/followups/${appointmentId}/resend`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${authToken}`,
+            },
+          });
+          const data = await response.json().catch(() => ({}));
+          if (response.status === 401) {
+            setAuthToken('');
+            throw new Error('Sessão expirada. Faça login novamente.');
+          }
+          if (!response.ok) {
+            throw new Error(data.error || 'Não foi possível reenviar o follow-up.');
+          }
+          if (agendaElements.followupAlert) {
+            agendaElements.followupAlert.className = 'alert alert-success mt-4';
+            agendaElements.followupAlert.textContent = 'Follow-up reenviado com sucesso.';
+            agendaElements.followupAlert.classList.remove('d-none');
+          }
+          await loadFollowups(followupStatusFilter);
+        } catch (erro) {
+          if (agendaElements.followupAlert) {
+            agendaElements.followupAlert.className = 'alert alert-danger mt-4';
+            agendaElements.followupAlert.textContent = erro.message || 'Falha ao reenviar o follow-up.';
+            agendaElements.followupAlert.classList.remove('d-none');
+          }
+        } finally {
+          if (triggerButton) {
+            triggerButton.disabled = false;
           }
         }
       }
@@ -2800,6 +3178,38 @@
             .querySelectorAll('[data-agenda-filter]')
             .forEach((el) => el.classList.toggle('active', el === button));
           renderAgendaTable();
+        });
+      }
+      if (agendaElements.followupFilterGroup) {
+        agendaElements.followupFilterGroup.addEventListener('click', (event) => {
+          const target = event.target instanceof HTMLElement ? event.target : null;
+          if (!target) {
+            return;
+          }
+          const button = target.closest('button[data-followup-filter]');
+          if (!button) {
+            return;
+          }
+          event.preventDefault();
+          const filter = button.getAttribute('data-followup-filter') || 'all';
+          loadFollowups(filter);
+        });
+      }
+      if (agendaElements.followupTable) {
+        agendaElements.followupTable.addEventListener('click', (event) => {
+          const target = event.target instanceof HTMLElement ? event.target : null;
+          if (!target) {
+            return;
+          }
+          const button = target.closest('button[data-followup-resend]');
+          if (!button) {
+            return;
+          }
+          event.preventDefault();
+          const appointmentId = Number(button.getAttribute('data-followup-resend'));
+          if (Number.isFinite(appointmentId) && appointmentId > 0) {
+            resendFollowup(appointmentId, button);
+          }
         });
       }
       const agendaTabButton = document.getElementById('tab-agenda');

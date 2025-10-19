@@ -82,6 +82,15 @@
   - `SchedulerService` garantindo execução diária via RQ, métricas Prometheus (`appointments_risk_high_total`, `appointments_auto_rescheduled_total`, `agenda_optimization_runs_total`) e dashboard Grafana “Agenda IA”.
   - Painel “Insights de Agenda” com gráfico de horários eficientes, recomendação textual e botão “Reagendar automaticamente faltas”.
 
+## Release v2.4 – Concluído
+
+- Status: ✅ Disponível – Follow-up automático pós-atendimento integrado ao Whaticket.
+- Entregas principais:
+  - Serviço `followup_service` com agendamento RQ (`followup_next_scheduled`), envio da mensagem padrão e auditoria `followup_sent`/`followup_response`.
+  - Ampliação da `ContextEngine` com intenções `followup_positive`, `followup_negative` e `followup_feedback`, disparando novo fluxo de agendamento e registrando comentários em `FeedbackEvent`.
+  - Nova seção “Pós-Atendimento” no painel da Agenda com taxa de resposta, filtro por status, botão “Reenviar follow-up” e gráfico de satisfação dos últimos 30 dias.
+  - Métricas Prometheus dedicadas (`appointment_followups_sent_total`, `appointment_followups_positive_total`, `appointment_followups_negative_total`) e API `/api/agenda/followups` para dashboards.
+
 | Componente | Status | Observações |
 | --- | --- | --- |
 | Backend Flask (rotas/serviços) | ⚙️ Em validação | Webhook e painel multiempresa concluídos; pendem testes extras para billing e limites por tenant. |

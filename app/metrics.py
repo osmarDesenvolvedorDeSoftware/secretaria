@@ -183,6 +183,24 @@ appointment_reminders_sent_total = Counter(
     ["company", "type"],
 )
 
+appointment_followups_sent_total = Counter(
+    f"{settings.metrics_namespace}_appointment_followups_sent_total",
+    "Total de mensagens de follow-up enviadas",
+    ["company"],
+)
+
+appointment_followups_positive_total = Counter(
+    f"{settings.metrics_namespace}_appointment_followups_positive_total",
+    "Total de respostas positivas aos follow-ups",
+    ["company"],
+)
+
+appointment_followups_negative_total = Counter(
+    f"{settings.metrics_namespace}_appointment_followups_negative_total",
+    "Total de respostas negativas aos follow-ups",
+    ["company"],
+)
+
 appointment_confirmations_total = Counter(
     f"{settings.metrics_namespace}_appointment_confirmations_total",
     "Total de confirmações de presença registradas",

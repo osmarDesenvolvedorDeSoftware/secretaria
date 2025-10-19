@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import relationship
 
 from .base import Base
@@ -30,6 +30,10 @@ class Appointment(Base):
     reminder_24h_sent = Column(DateTime(timezone=True), nullable=True)
     reminder_1h_sent = Column(DateTime(timezone=True), nullable=True)
     no_show_checked = Column(DateTime(timezone=True), nullable=True)
+    allow_followup = Column(Boolean, nullable=False, server_default="1", default=True)
+    followup_sent_at = Column(DateTime(timezone=True), nullable=True)
+    followup_response = Column(String(32), nullable=True)
+    followup_next_scheduled = Column(DateTime(timezone=True), nullable=True)
 
     company = relationship("Company", back_populates="appointments")
 
@@ -50,6 +54,12 @@ class Appointment(Base):
             "reminder_24h_sent": self.reminder_24h_sent.isoformat() if self.reminder_24h_sent else "",
             "reminder_1h_sent": self.reminder_1h_sent.isoformat() if self.reminder_1h_sent else "",
             "no_show_checked": self.no_show_checked.isoformat() if self.no_show_checked else "",
+            "allow_followup": bool(self.allow_followup),
+            "followup_sent_at": self.followup_sent_at.isoformat() if self.followup_sent_at else "",
+            "followup_response": self.followup_response or "",
+            "followup_next_scheduled": self.followup_next_scheduled.isoformat()
+            if self.followup_next_scheduled
+            else "",
         }
 
 
