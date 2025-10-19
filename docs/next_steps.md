@@ -65,6 +65,14 @@
   - Fluxo automático no worker WhatsApp listando opções, confirmando horário e persistindo compromissos.
   - Aba “Agenda” no painel com tabela dinâmica, filtro por data/cliente, criação manual e live refresh.
 
+## Release v2.2 – Concluído
+
+- Status: ✅ Disponível – Agenda proativa com lembretes automáticos, confirmações e detecção de no-show.
+- Entregas principais:
+  - Serviço `reminder_service` com agendamento de jobs RQ (24h/1h/manual), envio via Whaticket e auditoria `AuditLog`.
+  - Fluxo de confirmação/reagendamento no WhatsApp com atualização de status, métricas (`appointment_*_total`) e suporte a reagendamentos Cal.com.
+  - `no_show_service` com checagem pós-evento, feedback automático “Cliente não compareceu” e painel “Agenda Inteligente” aprimorado (filtros rápidos, taxa de presença, botão “Enviar lembrete agora”).
+
 | Componente | Status | Observações |
 | --- | --- | --- |
 | Backend Flask (rotas/serviços) | ⚙️ Em validação | Webhook e painel multiempresa concluídos; pendem testes extras para billing e limites por tenant. |

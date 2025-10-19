@@ -163,6 +163,7 @@ class DummyRedis:
 class DummyQueue:
     def __init__(self, *args, **kwargs):
         self.enqueued: list[tuple[Any, tuple[Any, ...], dict[str, Any]]] = []
+        self.scheduled: list[tuple[Any, tuple[Any, ...], dict[str, Any], Any]] = []
 
     def enqueue(self, *args, **kwargs):
         func = args[0]
@@ -175,6 +176,11 @@ class DummyQueue:
                 self.meta = meta
 
         return _Job(len(self.enqueued), kwargs.get("meta", {}))
+
+    def enqueue_at(self, when, func, *args, **kwargs):
+        job = self.enqueue(func, *args, **kwargs)
+        self.scheduled.append((when, (func, args, kwargs), kwargs.get("meta")))
+        return job
 
     def count(self):
         return len(self.enqueued)

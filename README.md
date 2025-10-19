@@ -1,6 +1,6 @@
 # Secretaria Virtual Whaticket
 
-[![Release](https://img.shields.io/badge/version-v2.1-blue.svg)](docs/release_v2.1.md)
+[![Release](https://img.shields.io/badge/version-v2.2-blue.svg)](docs/release_v2.2.md)
 
 Arquitetura pronta para produção para uma secretária virtual integrada ao Whaticket com Flask, Redis, RQ e PostgreSQL.
 
@@ -12,6 +12,7 @@ Arquitetura pronta para produção para uma secretária virtual integrada ao Wha
 - 📄 [Documentação de release v1.3](docs/release_v1.3.md)
 - 📄 [Documentação de release v2.0](docs/release_v2.0.md)
 - 📄 [Documentação de release v2.1](docs/release_v2.1.md)
+- 📄 [Documentação de release v2.2](docs/release_v2.2.md)
 
 * **Multi-tenancy completo** com isolamento por empresa em banco, Redis, filas RQ e JWT multiempresa.
 * **Provisionamento automático** via `/api/tenants/provision` com criação de planos, assinaturas, schemas e redis dedicados.
@@ -26,6 +27,7 @@ Arquitetura pronta para produção para uma secretária virtual integrada ao Wha
 * **Segurança** com sanitização, proteção contra prompt-injection e CORS desabilitado no webhook.
 * **Testes** com pytest + cobertura e ambiente Docker pronto.
 * **Agenda Inteligente** com integração Cal.com multi-tenant, webhook assinado e orquestração direta via WhatsApp.
+* **Lembretes e reagendamento inteligente** com confirmações proativas, métricas Prometheus e painel com taxa de presença.
 
 ## Requisitos
 
@@ -77,6 +79,12 @@ Arquitetura pronta para produção para uma secretária virtual integrada ao Wha
 3. Ative o fluxo WhatsApp: mensagens do cliente pedindo agendamento retornam sugestões automáticas de horário e confirmação com link.
 4. Utilize a nova aba **Agenda** do painel para visualizar compromissos, filtrar por data/cliente e criar reuniões manualmente.
 5. Monitore as métricas `secretaria_appointments_*` no Grafana “Agenda Inteligente” para acompanhar taxa de confirmação e latência.
+
+### v2.2 – Lembretes e Reagendamento Inteligente
+
+1. Lembretes automáticos 24h e 1h antes do início com botões de confirmação e opção de reagendar direto pelo WhatsApp.
+2. Fluxo de reagendamento inteligente reutilizando a disponibilidade Cal.com, atualizando status antigos e registrando auditoria e métricas.
+3. Detecção de no-show com feedback automático, taxa de presença no painel, filtros rápidos e ação “Enviar lembrete agora”.
 
 ## Comandos Principais
 
@@ -182,6 +190,10 @@ Expostas em `/metrics` no formato Prometheus com `HELP`/`TYPE` padrão. Destaque
 * `secretaria_appointments_confirmed_total`
 * `secretaria_appointments_cancelled_total`
 * `secretaria_appointments_latency_seconds`
+* `secretaria_appointment_reminders_sent_total{type="24h|1h|manual"}`
+* `secretaria_appointment_confirmations_total`
+* `secretaria_appointment_reschedules_total`
+* `secretaria_appointment_no_show_total`
 * `secretaria_healthcheck_failures_total{component="redis|postgres|rq_worker"}`
 * `secretaria_queue_size{company_id="..."}`
 * `secretaria_usage_messages_total{company_id="..."}`

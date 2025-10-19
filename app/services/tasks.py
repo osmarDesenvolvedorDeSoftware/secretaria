@@ -11,6 +11,8 @@ from rq import Queue, Retry, get_current_job
 from rq.job import Job
 
 from app.metrics import (
+    appointment_confirmations_total,
+    appointment_reschedules_total,
     fallback_transfers_total,
     llm_prompt_injection_blocked_total,
     message_usage_total,
@@ -29,6 +31,7 @@ from app.services.billing import BillingService
 from app.services.context_engine import ContextEngine, RuntimeContext
 from app.services import cal_service
 from app.services.llm import LLMClient
+from app.services.audit import AuditService
 from app.services.persistence import (
     add_delivery_log,
     get_or_create_conversation,
@@ -37,7 +40,7 @@ from app.services.persistence import (
 from app.services.security import detect_prompt_injection, sanitize_for_log, sanitize_text
 from app.services.tenancy import TenantContext, queue_name_for_company
 from app.services.whaticket import WhaticketClient, WhaticketError
-from app.models import Company
+from app.models import Appointment, Company
 
 
 APPOINTMENT_CONFIRMATION_WORDS = {
@@ -132,15 +135,122 @@ def _handle_agenda_flow(
 ):
     logger = structlog.get_logger().bind(task="agenda_flow", company_id=service.company_id, number=number)
     state = service.context_engine.get_agenda_state(number)
+    intention = runtime_context.intention or ""
+
+    def _get_upcoming() -> Appointment | None:
+        session = session_factory()
+        try:
+            if not hasattr(session, "query"):
+                return None
+            return (
+                session.query(Appointment)
+                .filter(
+                    Appointment.company_id == service.company_id,
+                    Appointment.client_phone == number,
+                    Appointment.start_time >= datetime.utcnow() - timedelta(hours=1),
+                    Appointment.status.in_(["pending", "confirmed"]),
+                )
+                .order_by(Appointment.start_time.asc())
+                .first()
+            )
+        finally:
+            session.close()
+
+    def _load_company() -> Company | None:
+        session = session_factory()
+        try:
+            getter = getattr(session, "get", None)
+            if getter is None:
+                return None
+            return getter(Company, service.company_id)
+        finally:
+            session.close()
+
+    def _prepare_options(
+        cliente_nome: str,
+        title: str,
+        phase: str,
+        state_extra: dict[str, object] | None = None,
+        intro: str | None = None,
+    ) -> str:
+        company = _load_company()
+        if company is None or not company.cal_default_user_id:
+            logger.warning("agenda_missing_user", company_id=service.company_id)
+            return "Ainda não tenho acesso à agenda automática desta empresa. Posso encaminhar para um atendente humano?"
+
+        start_range = datetime.utcnow()
+        end_range = start_range + timedelta(days=settings.cal_default_days_ahead)
+        try:
+            availability = cal_service.listar_disponibilidade(
+                company.cal_default_user_id,
+                start_range.isoformat(),
+                end_range.isoformat(),
+                company_id=service.company_id,
+            )
+        except cal_service.CalServiceConfigError:
+            logger.warning("agenda_api_key_missing")
+            return "A agenda automática ainda não está configurada. Posso agendar manualmente para você?"
+        except cal_service.CalServiceError as exc:
+            logger.warning("agenda_availability_error", error=str(exc))
+            return "Não consegui acessar a agenda agora. Posso tentar novamente mais tarde?"
+
+        if not availability:
+            return "No momento não encontrei horários disponíveis. Informe uma sugestão e verifico com a equipe."
+
+        prepared_options: list[dict[str, str]] = []
+        for slot in availability[:3]:
+            start_value = slot.get("start") or slot.get("startTime")
+            end_value = slot.get("end") or slot.get("endTime")
+            start_dt = _parse_iso_datetime(start_value)
+            end_dt = (
+                _parse_iso_datetime(end_value)
+                if end_value
+                else start_dt + timedelta(minutes=int(slot.get("duration") or 30))
+            )
+            duration = int(slot.get("duration") or max(int((end_dt - start_dt).total_seconds() // 60), 15))
+            prepared_options.append(
+                {
+                    "start": start_dt.isoformat(),
+                    "end": end_dt.isoformat(),
+                    "duration": duration,
+                    "label": _format_slot_label(start_dt).lower(),
+                }
+            )
+
+        state_payload: dict[str, object] = {
+            "phase": phase,
+            "options": prepared_options,
+            "title": title,
+            "client_name": cliente_nome,
+        }
+        if state_extra:
+            state_payload.update(state_extra)
+        service.context_engine.set_agenda_state(
+            number,
+            state_payload,
+            ttl=settings.context_ttl,
+        )
+        options_message = _build_options_message(prepared_options)
+        if intro:
+            return f"{intro}\n\n{options_message}"
+        return options_message
+
     if state:
+        phase = state.get("phase") or "awaiting_confirmation"
         options = state.get("options") or []
         option = _select_agenda_option(sanitized_message, options)
         if option:
-            cliente_nome = template_vars.get("nome") or runtime_context.profile.get("preferences", {}).get("nome") or "Cliente"
+            cliente_nome = (
+                state.get("client_name")
+                or template_vars.get("nome")
+                or runtime_context.profile.get("preferences", {}).get("nome")
+                or "Cliente"
+            )
             cliente = {"name": cliente_nome, "phone": number}
             titulo = state.get("title") or f"Reunião com {cliente_nome}"
             duracao = int(option.get("duration") or 30)
             horario = {"start": option.get("start"), "end": option.get("end")}
+            reschedule_mode = phase == "awaiting_reschedule"
             try:
                 result = cal_service.criar_agendamento(
                     service.company_id,
@@ -148,6 +258,8 @@ def _handle_agenda_flow(
                     horario,
                     titulo,
                     duracao,
+                    reschedule=reschedule_mode,
+                    original_appointment_id=state.get("original_appointment_id"),
                 )
             except cal_service.CalServiceError as exc:
                 logger.warning("agenda_confirm_error", error=str(exc))
@@ -156,9 +268,22 @@ def _handle_agenda_flow(
 
             service.context_engine.clear_agenda_state(number)
             start_dt = _parse_iso_datetime(option.get("start"))
-            human_time = _humanize_start(start_dt)
+            try:
+                localized = start_dt.astimezone()
+            except ValueError:
+                localized = start_dt
             meeting_url = result.get("meeting_url") or "https://cal.com"
-            return f"Reunião confirmada para {human_time}! Aqui está o link: {meeting_url}"
+            if reschedule_mode:
+                appointment_reschedules_total.labels(company=service.company_label).inc()
+                date_label = localized.strftime("%d/%m")
+                time_label = localized.strftime("%Hh%M")
+                message = f"Tudo certo, reagendamos sua reunião para {date_label} às {time_label} ✅"
+                if meeting_url:
+                    message += f"\nNovo link: {meeting_url}"
+                return message
+
+            human_time = _humanize_start(start_dt)
+            return f"Reunião agendada para {human_time}! Aqui está o link: {meeting_url}"
 
         if any(word in sanitized_message for word in APPOINTMENT_NEGATIVE_WORDS):
             service.context_engine.clear_agenda_state(number)
@@ -166,66 +291,71 @@ def _handle_agenda_flow(
 
         return "Por favor, responda com o número da opção desejada ou informe outro horário que eu verifico para você."
 
-    if runtime_context.intention != "appointment_request":
+    upcoming = _get_upcoming()
+
+    if intention == "appointment_confirmation":
+        if upcoming is None:
+            return "Não encontrei um agendamento futuro para confirmar. Posso ajudar com algo mais?"
+        recorded = False
+        if upcoming.status != "confirmed" or not getattr(upcoming, "confirmed_at", None):
+            session = session_factory()
+            try:
+                appointment = session.get(Appointment, upcoming.id)
+                if appointment is not None:
+                    appointment.status = "confirmed"
+                    appointment.confirmed_at = datetime.utcnow()
+                    session.add(appointment)
+                    session.commit()
+                    upcoming.status = "confirmed"
+                    upcoming.confirmed_at = appointment.confirmed_at
+                    recorded = True
+            finally:
+                session.close()
+        if recorded:
+            appointment_confirmations_total.labels(company=service.company_label).inc()
+            try:
+                AuditService(session_factory).record(
+                    company_id=service.company_id,
+                    actor="agenda",
+                    action="appointment.confirmed",
+                    resource="appointment",
+                    payload={"appointment_id": upcoming.id},
+                )
+            except Exception:
+                logger.warning("audit_confirmation_failed", appointment_id=upcoming.id)
+        try:
+            localized = upcoming.start_time.astimezone()
+        except ValueError:
+            localized = upcoming.start_time
+        date_label = localized.strftime("%d/%m")
+        time_label = localized.strftime("%Hh%M")
+        service.context_engine.clear_agenda_state(number)
+        return f"Perfeito! Sua presença está confirmada para {date_label} às {time_label}. Até lá!"
+
+    if intention == "appointment_reschedule":
+        if upcoming is None:
+            return "Não encontrei um agendamento ativo para reagendar. Deseja iniciar um novo agendamento?"
+        cliente_nome = upcoming.client_name or template_vars.get("nome") or "Cliente"
+        title = upcoming.title or f"Reunião com {cliente_nome}"
+        intro = "Claro! Estes horários estão disponíveis para reagendarmos."
+        return _prepare_options(
+            cliente_nome,
+            title,
+            "awaiting_reschedule",
+            {"original_appointment_id": upcoming.id},
+            intro,
+        )
+
+    if intention != "appointment_request":
         return None
 
-    session = session_factory()
-    try:
-        company = session.get(Company, service.company_id)
-    finally:
-        session.close()
-
-    if company is None or not company.cal_default_user_id:
-        logger.warning("agenda_missing_user", company_id=service.company_id)
-        return "Ainda não tenho acesso à agenda automática desta empresa. Posso encaminhar para um atendente humano?"
-
-    start_range = datetime.utcnow()
-    end_range = start_range + timedelta(days=settings.cal_default_days_ahead)
-    try:
-        availability = cal_service.listar_disponibilidade(
-            company.cal_default_user_id,
-            start_range.isoformat(),
-            end_range.isoformat(),
-            company_id=service.company_id,
-        )
-    except cal_service.CalServiceConfigError:
-        logger.warning("agenda_api_key_missing")
-        return "A agenda automática ainda não está configurada. Posso agendar manualmente para você?"
-    except cal_service.CalServiceError as exc:
-        logger.warning("agenda_availability_error", error=str(exc))
-        return "Não consegui acessar a agenda agora. Posso tentar novamente mais tarde?"
-
-    if not availability:
-        return "No momento não encontrei horários disponíveis. Informe uma sugestão e verifico com a equipe."
-
-    prepared_options: list[dict[str, str]] = []
-    for slot in availability[:3]:
-        start_value = slot.get("start") or slot.get("startTime")
-        end_value = slot.get("end") or slot.get("endTime")
-        start_dt = _parse_iso_datetime(start_value)
-        end_dt = _parse_iso_datetime(end_value) if end_value else start_dt + timedelta(minutes=int(slot.get("duration") or 30))
-        duration = int(slot.get("duration") or max(int((end_dt - start_dt).total_seconds() // 60), 15))
-        prepared_options.append(
-            {
-                "start": start_dt.isoformat(),
-                "end": end_dt.isoformat(),
-                "duration": duration,
-                "label": _format_slot_label(start_dt).lower(),
-            }
-        )
-
-    cliente_nome = template_vars.get("nome") or runtime_context.profile.get("preferences", {}).get("nome") or "Cliente"
-    title = f"Reunião com {cliente_nome}"
-    service.context_engine.set_agenda_state(
-        number,
-        {
-            "phase": "awaiting_confirmation",
-            "options": prepared_options,
-            "title": title,
-        },
-        ttl=settings.context_ttl,
+    cliente_nome = (
+        template_vars.get("nome")
+        or runtime_context.profile.get("preferences", {}).get("nome")
+        or "Cliente"
     )
-    return _build_options_message(prepared_options)
+    title = f"Reunião com {cliente_nome}"
+    return _prepare_options(cliente_nome, title, "awaiting_confirmation")
 class TaskService:
     def __init__(
         self,

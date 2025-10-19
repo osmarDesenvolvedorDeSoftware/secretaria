@@ -116,6 +116,34 @@ APPOINTMENT_WORDS = {
     "appointment",
 }
 
+APPOINTMENT_CONFIRMATION_WORDS = {
+    "confirmar",
+    "confirmo",
+    "confirmada",
+    "confirmado",
+    "estarei lá",
+    "estarei la",
+    "vou estar",
+    "ok",
+    "perfeito",
+    "tudo certo",
+}
+
+APPOINTMENT_RESCHEDULE_WORDS = {
+    "adiar",
+    "adianta",
+    "adiamento",
+    "remarcar",
+    "reagendar",
+    "reagenda",
+    "mudar horário",
+    "mudar horario",
+    "outro horário",
+    "outro horario",
+    "alterar horário",
+    "alterar horario",
+}
+
 
 @dataclass
 class RuntimeContext:
@@ -255,6 +283,10 @@ class ContextEngine:
             return "closing"
         if any(word in sanitized for word in URGENCY_WORDS):
             return "urgency"
+        if any(keyword in sanitized for keyword in APPOINTMENT_RESCHEDULE_WORDS):
+            return "appointment_reschedule"
+        if any(keyword in sanitized for keyword in APPOINTMENT_CONFIRMATION_WORDS):
+            return "appointment_confirmation"
         if any(keyword in sanitized for keyword in APPOINTMENT_WORDS):
             return "appointment_request"
         if "?" in sanitized or any(token in ("como", "quando", "onde", "qual", "quais", "pode") for token in tokens):

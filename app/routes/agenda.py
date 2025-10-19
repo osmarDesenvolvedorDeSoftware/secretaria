@@ -10,7 +10,8 @@ from flask import Blueprint, current_app, jsonify, request
 from app.metrics import webhook_received_counter
 from app.models import Appointment, Company
 from app.routes.panel_auth import require_panel_auth, require_panel_company_id
-from app.services import cal_service
+from app.services import cal_service, reminder_service
+from app.services.whaticket import WhaticketError
 
 
 agenda_bp = Blueprint("agenda", __name__, url_prefix="/api/agenda")
@@ -68,7 +69,11 @@ def list_appointments():
             .all()
         )
         payload = [item.to_dict() for item in items]
-        return jsonify({"appointments": payload})
+        relevant = [item for item in items if item.status != "cancelled"]
+        total = len(relevant)
+        confirmed = sum(1 for item in relevant if item.status == "confirmed")
+        attendance_rate = confirmed / total if total else 0.0
+        return jsonify({"appointments": payload, "attendance_rate": attendance_rate})
     finally:
         session.close()
 
@@ -121,6 +126,24 @@ def cancel_booking():
         return jsonify({"error": "cal_unavailable"}), 502
 
     return jsonify({"cancelled": True})
+
+
+@agenda_bp.post("/appointments/<int:appointment_id>/reminder")
+@require_panel_auth
+def trigger_manual_reminder(appointment_id: int):
+    try:
+        success = reminder_service.enviar_lembrete(appointment_id, "manual")
+    except WhaticketError as exc:
+        LOGGER.warning("manual_reminder_failed", appointment_id=appointment_id, error=str(exc))
+        return jsonify({"error": "reminder_failed"}), 502
+    except Exception as exc:  # pragma: no cover - defensive fallback
+        LOGGER.warning("manual_reminder_unexpected", appointment_id=appointment_id, error=str(exc))
+        return jsonify({"error": "reminder_failed"}), 500
+
+    if not success:
+        return jsonify({"error": "appointment_not_found"}), 404
+
+    return jsonify({"reminder_sent": True})
 
 
 @agenda_bp.post("/webhook/cal")

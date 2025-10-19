@@ -66,6 +66,7 @@ def test_appointments_listing(client: FlaskClient, app: Flask) -> None:
     assert response.status_code == 200
     data = response.get_json()
     assert any(item["cal_booking_id"] == "abc" for item in data["appointments"])
+    assert "attendance_rate" in data
 
 
 def test_manual_booking_and_cancel(client: FlaskClient, monkeypatch) -> None:

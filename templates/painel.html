@@ -484,7 +484,25 @@
           </div>
         </div>
         <div class="tab-pane fade" id="painel-agenda" role="tabpanel" aria-labelledby="tab-agenda">
-          <div class="d-flex flex-column flex-lg-row gap-3 align-items-lg-center justify-content-between mb-3">
+          <div class="d-flex flex-column gap-3 mb-3">
+            <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
+              <div class="d-flex flex-wrap align-items-center gap-3">
+                <div>
+                  <span class="form-label mb-0 small text-muted">Taxa de presença</span>
+                  <div id="agenda-attendance-rate" class="fs-5 fw-semibold">-</div>
+                </div>
+                <div class="btn-group btn-group-sm" role="group" id="agenda-filter-group">
+                  <button type="button" class="btn btn-outline-primary active" data-agenda-filter="all">Todos</button>
+                  <button type="button" class="btn btn-outline-primary" data-agenda-filter="today">Hoje</button>
+                  <button type="button" class="btn btn-outline-primary" data-agenda-filter="next">Próximos 7 dias</button>
+                  <button type="button" class="btn btn-outline-primary" data-agenda-filter="pending">Não confirmados</button>
+                </div>
+              </div>
+              <div class="d-flex gap-2">
+                <button id="btn-agenda-refresh" class="btn btn-outline-secondary btn-sm" type="button">Atualizar</button>
+                <button id="btn-agenda-create" class="btn btn-primary btn-sm" type="button">Criar manualmente</button>
+              </div>
+            </div>
             <div class="d-flex flex-wrap gap-2 align-items-center">
               <div>
                 <label for="agenda-filter-date" class="form-label mb-0 small text-muted">Filtrar por data</label>
@@ -494,10 +512,6 @@
                 <label for="agenda-filter-client" class="form-label mb-0 small text-muted">Filtrar por cliente</label>
                 <input type="text" id="agenda-filter-client" class="form-control form-control-sm" placeholder="Nome ou telefone" />
               </div>
-            </div>
-            <div class="d-flex gap-2">
-              <button id="btn-agenda-refresh" class="btn btn-outline-secondary btn-sm" type="button">Atualizar</button>
-              <button id="btn-agenda-create" class="btn btn-primary btn-sm" type="button">Criar manualmente</button>
             </div>
           </div>
           <div id="agenda-alert" class="alert alert-info d-none" role="alert"></div>
@@ -620,6 +634,8 @@
         createButton: document.getElementById('btn-agenda-create'),
         filterDate: document.getElementById('agenda-filter-date'),
         filterClient: document.getElementById('agenda-filter-client'),
+        filterGroup: document.getElementById('agenda-filter-group'),
+        attendanceRate: document.getElementById('agenda-attendance-rate'),
         formWrapper: document.getElementById('agenda-form-wrapper'),
         form: document.getElementById('agenda-create-form'),
         formCancel: document.getElementById('agenda-form-cancel'),
@@ -634,6 +650,7 @@
         },
       };
       let agendaAppointments = [];
+      let agendaQuickFilter = 'all';
       let businessNpsChart = null;
       const toneInputs = document.querySelectorAll('#tone-group input[type="radio"]');
       const formalityRange = document.getElementById('config-formality');
@@ -1217,19 +1234,58 @@
           agendaElements.formWrapper.classList.add('d-none');
         }
         agendaAppointments = [];
+        agendaQuickFilter = 'all';
+        if (agendaElements.attendanceRate) {
+          agendaElements.attendanceRate.textContent = '-';
+        }
+        if (agendaElements.filterGroup) {
+          agendaElements.filterGroup
+            .querySelectorAll('[data-agenda-filter]')
+            .forEach((button) => button.classList.toggle('active', button.dataset.agendaFilter === 'all'));
+        }
+      }
+
+      function updateAttendanceRateDisplay(rate) {
+        if (!agendaElements.attendanceRate) {
+          return;
+        }
+        if (typeof rate !== 'number' || Number.isNaN(rate)) {
+          agendaElements.attendanceRate.textContent = '-';
+          return;
+        }
+        agendaElements.attendanceRate.textContent = `${(rate * 100).toFixed(1)}%`;
       }
 
       function filterAgendaData() {
         const appointments = Array.isArray(agendaAppointments) ? agendaAppointments : [];
         const dateFilter = agendaElements.filterDate ? agendaElements.filterDate.value : '';
         const clientFilter = agendaElements.filterClient ? agendaElements.filterClient.value.trim().toLowerCase() : '';
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+        const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
+        const nextSeven = new Date(todayStart.getTime() + 7 * 24 * 60 * 60 * 1000);
         return appointments.filter((item) => {
           const startDate = String(item.start_time || '').slice(0, 10);
+          const startObj = item.start_time ? new Date(item.start_time) : null;
           const matchesDate = !dateFilter || startDate === dateFilter;
           const name = String(item.client_name || '').toLowerCase();
           const phone = String(item.client_phone || '').toLowerCase();
           const matchesClient = !clientFilter || name.includes(clientFilter) || phone.includes(clientFilter);
-          return matchesDate && matchesClient;
+          if (!matchesDate || !matchesClient) {
+            return false;
+          }
+          const quickFilter = agendaQuickFilter;
+          if (quickFilter === 'today') {
+            return startObj && startObj >= todayStart && startObj < todayEnd;
+          }
+          if (quickFilter === 'next') {
+            return startObj && startObj >= todayStart && startObj < nextSeven;
+          }
+          if (quickFilter === 'pending') {
+            const status = String(item.status || '').toLowerCase();
+            return status !== 'confirmed';
+          }
+          return true;
         });
       }
 
@@ -1258,15 +1314,42 @@
             const endLabel = endDate
               ? endDate.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
               : '-';
-            const status = String(item.status || 'confirmed').toLowerCase();
-            const badgeClass =
-              status === 'cancelled' ? 'bg-danger' : status === 'rescheduled' ? 'bg-warning text-dark' : 'bg-success';
-            const statusLabel =
-              status === 'cancelled' ? 'Cancelado' : status === 'rescheduled' ? 'Reagendado' : 'Confirmado';
+            const status = String(item.status || 'pending').toLowerCase();
+            let badgeClass = 'bg-secondary';
+            let statusLabel = 'Pendente';
+            let statusIcon = '⏳';
+            if (status === 'confirmed') {
+              badgeClass = 'bg-success';
+              statusLabel = 'Confirmado';
+              statusIcon = '✅';
+            } else if (status === 'rescheduled') {
+              badgeClass = 'bg-warning text-dark';
+              statusLabel = 'Reagendado';
+              statusIcon = '🔁';
+            } else if (status === 'no_show') {
+              badgeClass = 'bg-danger';
+              statusLabel = 'No-show';
+              statusIcon = '⚠️';
+            } else if (status === 'cancelled') {
+              badgeClass = 'bg-danger';
+              statusLabel = 'Cancelado';
+              statusIcon = '❌';
+            }
+            const reminder24 = item.reminder_24h_sent
+              ? new Date(item.reminder_24h_sent).toLocaleString('pt-BR')
+              : '—';
+            const reminder1h = item.reminder_1h_sent
+              ? new Date(item.reminder_1h_sent).toLocaleString('pt-BR')
+              : '—';
+            const tooltip = `24h: ${reminder24}\n1h: ${reminder1h}`.replace(/"/g, '&quot;');
             const meetingLink = item.meeting_url
               ? `<a href="${item.meeting_url}" target="_blank" rel="noopener">Abrir</a>`
               : '-';
-            const actions =
+            const reminderButton =
+              status !== 'cancelled' && status !== 'no_show'
+                ? `<button class="btn btn-sm btn-outline-primary me-1" data-action="send-reminder" data-appointment-id="${item.id}">Enviar lembrete agora</button>`
+                : '';
+            const cancelButton =
               status === 'cancelled'
                 ? ''
                 : `<button class="btn btn-sm btn-outline-danger" data-action="cancel-agenda" data-booking-id="${item.cal_booking_id}">Cancelar</button>`;
@@ -1276,13 +1359,25 @@
                 <td>${startLabel}</td>
                 <td>${endLabel}</td>
                 <td>${item.title || '-'}</td>
-                <td><span class="badge ${badgeClass}">${statusLabel}</span></td>
+                <td>
+                  <span class="badge ${badgeClass}" data-bs-toggle="tooltip" data-bs-placement="top" title="${tooltip}">
+                    ${statusIcon} ${statusLabel}
+                  </span>
+                </td>
                 <td>${meetingLink}</td>
-                <td class="text-end">${actions}</td>
+                <td class="text-end">${reminderButton}${cancelButton}</td>
               </tr>
             `;
           })
           .join('');
+        const tooltipElements = document.querySelectorAll('#agenda-table [data-bs-toggle="tooltip"]');
+        tooltipElements.forEach((el) => {
+          const existing = bootstrap.Tooltip.getInstance(el);
+          if (existing) {
+            existing.dispose();
+          }
+          new bootstrap.Tooltip(el);
+        });
       }
 
       async function loadAgenda() {
@@ -1307,6 +1402,7 @@
           }
           const data = await response.json();
           agendaAppointments = Array.isArray(data.appointments) ? data.appointments : [];
+          updateAttendanceRateDisplay(Number(data.attendance_rate ?? 0));
           renderAgendaTable();
         } catch (erro) {
           resetAgendaUI();
@@ -1435,6 +1531,40 @@
           if (agendaElements.alertBox) {
             agendaElements.alertBox.className = 'alert alert-danger';
             agendaElements.alertBox.textContent = erro.message || 'Erro ao cancelar agendamento.';
+            agendaElements.alertBox.classList.remove('d-none');
+          }
+        }
+      }
+
+      async function sendAgendaReminder(appointmentId) {
+        if (!ensureAuthentication()) {
+          return;
+        }
+        try {
+          const response = await fetch(`/api/agenda/appointments/${encodeURIComponent(appointmentId)}/reminder`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${authToken}`,
+            },
+          });
+          if (response.status === 401) {
+            setAuthToken('');
+            throw new Error('Sessão expirada. Faça login novamente.');
+          }
+          if (!response.ok) {
+            const errorPayload = await response.json().catch(() => ({}));
+            throw new Error(errorPayload.error || 'Não foi possível enviar o lembrete.');
+          }
+          if (agendaElements.alertBox) {
+            agendaElements.alertBox.className = 'alert alert-success';
+            agendaElements.alertBox.textContent = 'Lembrete enviado com sucesso.';
+            agendaElements.alertBox.classList.remove('d-none');
+          }
+          await loadAgenda();
+        } catch (erro) {
+          if (agendaElements.alertBox) {
+            agendaElements.alertBox.className = 'alert alert-danger';
+            agendaElements.alertBox.textContent = erro.message || 'Erro ao enviar lembrete.';
             agendaElements.alertBox.classList.remove('d-none');
           }
         }
@@ -2460,13 +2590,41 @@
           if (!target) {
             return;
           }
-          const button = target.closest('[data-action="cancel-agenda"]');
-          if (button) {
+          const button = target.closest('[data-action]');
+          if (!button) {
+            return;
+          }
+          const action = button.getAttribute('data-action');
+          if (action === 'cancel-agenda') {
             const bookingId = button.getAttribute('data-booking-id');
             if (bookingId && confirm('Deseja cancelar este agendamento?')) {
               cancelAgendaBooking(bookingId);
             }
+          } else if (action === 'send-reminder') {
+            const appointmentId = button.getAttribute('data-appointment-id');
+            if (appointmentId) {
+              sendAgendaReminder(appointmentId);
+            }
           }
+        });
+      }
+      if (agendaElements.filterGroup) {
+        agendaElements.filterGroup.addEventListener('click', (event) => {
+          const target = event.target instanceof HTMLElement ? event.target : null;
+          if (!target) {
+            return;
+          }
+          const button = target.closest('[data-agenda-filter]');
+          if (!button) {
+            return;
+          }
+          event.preventDefault();
+          const filterValue = button.getAttribute('data-agenda-filter') || 'all';
+          agendaQuickFilter = filterValue;
+          agendaElements.filterGroup
+            .querySelectorAll('[data-agenda-filter]')
+            .forEach((el) => el.classList.toggle('active', el === button));
+          renderAgendaTable();
         });
       }
       const agendaTabButton = document.getElementById('tab-agenda');
