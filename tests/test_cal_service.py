@@ -68,6 +68,8 @@ def test_criar_agendamento_persists_appointment(app, monkeypatch) -> None:
         )
 
     monkeypatch.setattr(cal_service, "_perform_request", fake_request)
+    monkeypatch.setattr("app.services.reminder_service.agendar_lembretes_padrao", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("app.services.no_show_service.agendar_verificacao_no_show", lambda *_args, **_kwargs: None)
 
     with app.app_context():
         result = cal_service.criar_agendamento(
@@ -81,7 +83,7 @@ def test_criar_agendamento_persists_appointment(app, monkeypatch) -> None:
         session = app.db_session()
         appointment = session.query(Appointment).filter_by(cal_booking_id="booking-1").one()
         assert appointment.client_name == "Cliente Teste"
-        assert appointment.status == "confirmed"
+        assert appointment.status == "pending"
         assert appointment.meeting_url == "https://agenda.example/meeting/booking-1"
 
 

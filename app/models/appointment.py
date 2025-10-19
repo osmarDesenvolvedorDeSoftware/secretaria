@@ -23,9 +23,13 @@ class Appointment(Base):
     end_time = Column(DateTime(timezone=True), nullable=False)
     title = Column(String(200), nullable=False)
     cal_booking_id = Column(String(64), nullable=False, unique=True)
-    status = Column(String(32), nullable=False, default="confirmed")
+    status = Column(String(32), nullable=False, default="pending")
     meeting_url = Column(String(512), nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    confirmed_at = Column(DateTime(timezone=True), nullable=True)
+    reminder_24h_sent = Column(DateTime(timezone=True), nullable=True)
+    reminder_1h_sent = Column(DateTime(timezone=True), nullable=True)
+    no_show_checked = Column(DateTime(timezone=True), nullable=True)
 
     company = relationship("Company", back_populates="appointments")
 
@@ -42,6 +46,10 @@ class Appointment(Base):
             "status": self.status,
             "meeting_url": self.meeting_url or "",
             "created_at": self.created_at.isoformat() if self.created_at else "",
+            "confirmed_at": self.confirmed_at.isoformat() if self.confirmed_at else "",
+            "reminder_24h_sent": self.reminder_24h_sent.isoformat() if self.reminder_24h_sent else "",
+            "reminder_1h_sent": self.reminder_1h_sent.isoformat() if self.reminder_1h_sent else "",
+            "no_show_checked": self.no_show_checked.isoformat() if self.no_show_checked else "",
         }
 
 

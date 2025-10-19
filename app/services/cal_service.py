@@ -18,6 +18,7 @@ from app.metrics import (
     appointments_total,
 )
 from app.models import Appointment, Company
+from app.services import no_show_service, reminder_service
 from app.services.audit import AuditService
 
 
@@ -147,6 +148,9 @@ def criar_agendamento(
     horario: dict[str, Any],
     titulo: str,
     duracao: int,
+    *,
+    reschedule: bool = False,
+    original_appointment_id: int | None = None,
 ) -> dict[str, Any]:
     session = _session_factory()()
     try:
@@ -193,11 +197,40 @@ def criar_agendamento(
             end_time=end,
             title=titulo,
             cal_booking_id=booking_id,
-            status="confirmed",
+            status="pending",
             meeting_url=meeting_url,
         )
         session.add(appointment)
         session.commit()
+        session.refresh(appointment)
+
+        if reschedule and original_appointment_id:
+            previous = session.get(Appointment, original_appointment_id)
+            if previous is not None:
+                previous.status = "rescheduled"
+                session.add(previous)
+                session.commit()
+                _get_audit_service().record(
+                    company_id=company.id,
+                    actor="agenda",
+                    action="appointment.rescheduled",
+                    resource="appointment",
+                    payload={
+                        "appointment_id": previous.id,
+                        "new_appointment_id": appointment.id,
+                        "booking_id": booking_id,
+                    },
+                )
+
+        try:
+            reminder_service.agendar_lembretes_padrao(appointment)
+        except Exception as exc:  # pragma: no cover - scheduling failures shouldn't break flow
+            LOGGER.warning("schedule_reminders_failed", error=str(exc), appointment_id=appointment.id)
+        try:
+            check_time = appointment.end_time + timedelta(minutes=30)
+            no_show_service.agendar_verificacao_no_show(appointment.id, check_time)
+        except Exception as exc:  # pragma: no cover - scheduling failures shouldn't break flow
+            LOGGER.warning("schedule_no_show_failed", error=str(exc), appointment_id=appointment.id)
 
         appointments_confirmed_total.labels(company=str(company.id)).inc()
 

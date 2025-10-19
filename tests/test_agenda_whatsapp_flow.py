@@ -36,7 +36,7 @@ def test_whatsapp_agenda_flow(app, monkeypatch) -> None:
 
     monkeypatch.setattr("app.services.llm.LLMClient.generate_reply", fake_llm)
 
-    def fake_create(company_id, cliente, horario, titulo, duracao):
+    def fake_create(company_id, cliente, horario, titulo, duracao, *, reschedule=False, original_appointment_id=None):
         assert company_id == 1
         assert cliente["name"]
         start = datetime.fromisoformat(horario["start"].replace("Z", "+00:00"))
@@ -50,7 +50,7 @@ def test_whatsapp_agenda_flow(app, monkeypatch) -> None:
             end_time=end,
             title=titulo,
             cal_booking_id="booking-flow",
-            status="confirmed",
+            status="pending",
             meeting_url="https://agenda.example/meeting/booking-flow",
         )
         session.add(appointment)
@@ -70,7 +70,7 @@ def test_whatsapp_agenda_flow(app, monkeypatch) -> None:
 
     process_incoming_message(1, "+5511999999999", "1", "text", "cid-2")
     assert len(sent_messages) >= 2
-    assert "Reunião confirmada" in sent_messages[-1]
+    assert "Reunião agendada" in sent_messages[-1]
     assert "https://agenda.example/meeting/booking-flow" in sent_messages[-1]
 
     with app.app_context():
@@ -78,3 +78,4 @@ def test_whatsapp_agenda_flow(app, monkeypatch) -> None:
         stored = session.query(Appointment).filter_by(cal_booking_id="booking-flow").first()
         assert stored is not None
         assert stored.client_phone == "+5511999999999"
+        assert stored.status == "pending"

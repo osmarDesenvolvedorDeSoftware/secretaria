@@ -159,6 +159,30 @@ appointments_total = Counter(
     ["company"],
 )
 
+appointment_reminders_sent_total = Counter(
+    f"{settings.metrics_namespace}_appointment_reminders_sent_total",
+    "Total de lembretes de agendamentos enviados",
+    ["company", "type"],
+)
+
+appointment_confirmations_total = Counter(
+    f"{settings.metrics_namespace}_appointment_confirmations_total",
+    "Total de confirmações de presença registradas",
+    ["company"],
+)
+
+appointment_reschedules_total = Counter(
+    f"{settings.metrics_namespace}_appointment_reschedules_total",
+    "Total de reagendamentos concluídos",
+    ["company"],
+)
+
+appointment_no_show_total = Counter(
+    f"{settings.metrics_namespace}_appointment_no_show_total",
+    "Total de no-shows identificados",
+    ["company"],
+)
+
 appointments_confirmed_total = Counter(
     f"{settings.metrics_namespace}_appointments_confirmed_total",
     "Total de agendamentos confirmados",
