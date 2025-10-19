@@ -4,7 +4,7 @@ import hashlib
 import json
 import re
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
@@ -16,6 +16,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.metrics import (
+    intention_distribution_total,
+    satisfaction_ratio_gauge,
+    sentiment_average_gauge,
+)
 from app.models import Conversation, CustomerContext, PersonalizationConfig
 
 LOGGER = structlog.get_logger().bind(service="context_engine")
@@ -57,6 +62,46 @@ STOPWORDS = {
     "favor",
 }
 
+POSITIVE_MARKERS = {
+    "obrigado",
+    "obrigada",
+    "perfeito",
+    "ótimo",
+    "otimo",
+    "excelente",
+    "maravilha",
+    "show",
+    "🙏",
+    "😄",
+    "😊",
+    "😀",
+    "👍",
+}
+
+NEGATIVE_MARKERS = {
+    "triste",
+    "chateado",
+    "chateada",
+    "péssimo",
+    "pessimo",
+    "horrível",
+    "horrivel",
+    "raiva",
+    "problema",
+    "erro",
+    "reclamação",
+    "reclamacao",
+    "😡",
+    "😢",
+    "😭",
+    "👎",
+    "urgente",
+}
+
+GREETING_WORDS = {"oi", "olá", "ola", "bom dia", "boa tarde", "boa noite", "eai", "ei"}
+CLOSING_WORDS = {"obrigado", "obrigada", "valeu", "até mais", "ate mais", "até logo"}
+URGENCY_WORDS = {"urgente", "agora", "imediato", "imediatamente", "socorro", "rápido", "rapido"}
+
 
 @dataclass
 class RuntimeContext:
@@ -66,6 +111,12 @@ class RuntimeContext:
     profile: dict[str, Any]
     personalization: dict[str, Any]
     ai_enabled: bool
+    sentiment: str = "neutral"
+    sentiment_score: float = 0.0
+    intention: str = "follow_up"
+    template_name: str = "default"
+    tone_profile: dict[str, Any] = field(default_factory=dict)
+    feedback: str | None = None
 
 
 class EmbeddingClient:
@@ -141,6 +192,154 @@ class ContextEngine:
         self.embedding_client = EmbeddingClient()
         self.templates = self._load_templates()
 
+    # Utility helpers ------------------------------------------------------------------
+    def _tokenize(self, text: str) -> list[str]:
+        return re.findall(r"[\wáàâãéèêíóôõúç]+", text.lower())
+
+    def _analyze_sentiment(self, text: str) -> tuple[str, float]:
+        tokens = self._tokenize(text)
+        score = 0.0
+        for token in tokens:
+            if token in POSITIVE_MARKERS:
+                score += 1
+            if token in NEGATIVE_MARKERS:
+                score -= 1
+        if any(marker in text for marker in POSITIVE_MARKERS):
+            score += 0.5
+        if any(marker in text for marker in NEGATIVE_MARKERS):
+            score -= 0.5
+        if score > 0.5:
+            return "positive", min(score, 5.0)
+        if score < -0.5:
+            return "negative", max(score, -5.0)
+        return "neutral", score
+
+    def _detect_feedback(self, text: str) -> str | None:
+        if "👍" in text or ":)" in text or "obrigado" in text.lower() or "obrigada" in text.lower():
+            return "positive"
+        if "👎" in text or ":(" in text or "nao gostei" in text.lower() or "não gostei" in text.lower():
+            return "negative"
+        return None
+
+    def _detect_intention(self, text: str, history: Sequence[dict[str, str]]) -> str:
+        sanitized = text.lower().strip()
+        if not sanitized:
+            return "follow_up"
+        tokens = self._tokenize(sanitized)
+        if any(word in sanitized for word in GREETING_WORDS):
+            return "greeting"
+        if any(word in sanitized for word in CLOSING_WORDS):
+            return "closing"
+        if any(word in sanitized for word in URGENCY_WORDS):
+            return "urgency"
+        if "?" in sanitized or any(token in ("como", "quando", "onde", "qual", "quais", "pode") for token in tokens):
+            return "doubt"
+        if tokens and len(tokens) <= 2 and tokens[0] in {"sim", "ok", "claro", "beleza", "manda"}:
+            return "acknowledgement"
+
+        if history:
+            last_user = next((item for item in reversed(history) if item.get("role") == "user"), None)
+            if last_user is not None:
+                last_body = str(last_user.get("body", "")).lower()
+                if last_body and sanitized in {"sim", "isso", "certo"}:
+                    return "confirmation"
+        return "follow_up"
+
+    def _build_dialogue_summary(self, history: Sequence[dict[str, str]]) -> str:
+        if not history:
+            return ""
+        snippets: list[str] = []
+        for item in history[-6:]:
+            role = item.get("role", "")
+            body = str(item.get("body", ""))[:100].strip()
+            if not body:
+                continue
+            prefix = "Cliente" if role == "user" else "Assistente"
+            snippets.append(f"{prefix}: {body}")
+        return " | ".join(snippets[-4:])
+
+    def _build_tone_profile(self, config: dict[str, Any], sentiment: str) -> dict[str, Any]:
+        tone = str(config.get("tone_of_voice") or "amigavel").lower()
+        formality = config.get("formality_level", 50)
+        empathy = config.get("empathy_level", 70)
+        adaptive_humor = bool(config.get("adaptive_humor", True))
+        try:
+            formality_value = int(formality)
+        except (TypeError, ValueError):
+            formality_value = 50
+        try:
+            empathy_value = int(empathy)
+        except (TypeError, ValueError):
+            empathy_value = 70
+        formality_value = max(0, min(100, formality_value))
+        empathy_value = max(0, min(100, empathy_value))
+        humor_enabled = adaptive_humor and sentiment != "negative"
+        return {
+            "tone": tone,
+            "formality_level": formality_value,
+            "empathy_level": empathy_value,
+            "humor_enabled": bool(humor_enabled),
+        }
+
+    def _select_template_name(self, intention: str, sentiment: str) -> str:
+        candidates: list[str] = []
+        normalized_intention = intention or "follow_up"
+        normalized_sentiment = sentiment or "neutral"
+        if normalized_intention and normalized_intention != "follow_up":
+            if normalized_sentiment != "neutral":
+                candidates.append(f"{normalized_intention}_{normalized_sentiment}")
+            candidates.append(normalized_intention)
+        if normalized_sentiment != "neutral":
+            candidates.append(f"sentiment_{normalized_sentiment}")
+        candidates.append("default")
+        for candidate in candidates:
+            if candidate in self.templates:
+                return candidate
+        return "default"
+
+    def _update_sentiment_metrics(self, number: str, score: float) -> None:
+        key = f"ctx:sentiment:{number}"
+        try:
+            pipeline = self.redis.pipeline()
+            pipeline.hincrbyfloat(key, "total", score)
+            pipeline.hincrby(key, "count", 1)
+            pipeline.expire(key, settings.context_ttl)
+            results = pipeline.execute()
+            total = float(results[0]) if results and results[0] is not None else float(score)
+            count = int(results[1]) if len(results) > 1 and results[1] is not None else 1
+            if count <= 0:
+                count = 1
+            sentiment_average_gauge.labels(number=number).set(total / count)
+        except Exception:
+            LOGGER.debug("sentiment_metrics_update_failed", number=number)
+
+    def _update_feedback_metrics(self, number: str, feedback: str | None) -> None:
+        if not feedback:
+            return
+        key = f"ctx:satisfaction:{number}"
+        try:
+            if feedback == "positive":
+                self.redis.hincrby(key, "positive", 1)
+            elif feedback == "negative":
+                self.redis.hincrby(key, "negative", 1)
+            self.redis.expire(key, settings.context_ttl)
+            data = self.redis.hgetall(key) or {}
+            positive_raw = data.get(b"positive") if isinstance(data, dict) else None
+            negative_raw = data.get(b"negative") if isinstance(data, dict) else None
+            positive = int(positive_raw.decode()) if isinstance(positive_raw, (bytes, bytearray)) else int(positive_raw or 0)
+            negative = int(negative_raw.decode()) if isinstance(negative_raw, (bytes, bytearray)) else int(negative_raw or 0)
+            total = positive + negative
+            if total > 0:
+                satisfaction_ratio_gauge.labels(number=number).set(positive / total)
+        except Exception:
+            LOGGER.debug("feedback_metrics_update_failed", number=number)
+
+    def _register_intention_metric(self, intention: str) -> None:
+        try:
+            intention_distribution_total.labels(intention=intention or "follow_up").inc()
+        except Exception:
+            LOGGER.debug("intention_metric_update_failed", intention=intention)
+
     # Template handling -----------------------------------------------------------------
     def _load_templates(self) -> dict[str, dict[str, Any]]:
         template_path = (
@@ -180,6 +379,9 @@ class ContextEngine:
             return str(value)
 
         return re.sub(r"{{\s*([^{}]+)\s*}}", replace, text)
+
+    def template_exists(self, name: str) -> bool:
+        return name in self.templates
 
     # Session helpers -------------------------------------------------------------------
     def _session(self) -> Session:
@@ -353,6 +555,9 @@ class ContextEngine:
             "message_limit": settings.context_max_messages,
             "opening_phrases": [],
             "ai_enabled": True,
+            "formality_level": 50,
+            "empathy_level": 70,
+            "adaptive_humor": True,
         }
 
     # Public API ------------------------------------------------------------------------
@@ -378,6 +583,15 @@ class ContextEngine:
             limit = settings.context_max_messages
         trimmed_history = history[-limit:]
 
+        dialogue_summary = self._build_dialogue_summary(trimmed_history)
+        sentiment_label, sentiment_score = self._analyze_sentiment(user_message)
+        intention = self._detect_intention(user_message, trimmed_history)
+        feedback = self._detect_feedback(user_message)
+
+        self._update_sentiment_metrics(number, sentiment_score)
+        self._update_feedback_metrics(number, feedback)
+        self._register_intention_metric(intention)
+
         last_subject = profile.get("last_subject") or user_message[:80]
         preferences = profile.get("preferences") or {}
         nome = preferences.get("nome") or preferences.get("name") or "cliente"
@@ -385,7 +599,8 @@ class ContextEngine:
         phrases = config.get("opening_phrases") or []
         if isinstance(phrases, list) and phrases:
             saudacao = phrases[0]
-        tone = config.get("tone_of_voice") or "amigavel"
+        tone_profile = self._build_tone_profile(config, sentiment_label)
+        tone = tone_profile.get("tone", "amigavel")
 
         frequent_topics = profile.get("frequent_topics") or []
         if isinstance(frequent_topics, list):
@@ -401,6 +616,8 @@ class ContextEngine:
             "Você é uma assistente virtual da Secretaria Virtual.",
             f"Use um tom {tone} ao responder.",
             f"O cliente se chama {nome}.",
+            f"Nível de formalidade esperado: {tone_profile['formality_level']}/100.",
+            f"Grau de empatia esperado: {tone_profile['empathy_level']}/100.",
         ]
         if topics_text:
             system_prompt_parts.append(
@@ -412,10 +629,40 @@ class ContextEngine:
             system_prompt_parts.append(
                 f"Último assunto tratado: {last_subject}."
             )
+        if dialogue_summary:
+            system_prompt_parts.append(
+                f"Resumo recente da conversa: {dialogue_summary}. Garanta continuidade do mesmo assunto."
+            )
+        if sentiment_label == "negative":
+            system_prompt_parts.append(
+                "O cliente demonstra frustração. Responda com empatia, valide o sentimento e ofereça próximos passos claros."
+            )
+        elif sentiment_label == "positive":
+            system_prompt_parts.append(
+                "O cliente está receptivo. Seja entusiasmada sem perder a clareza."
+            )
+        if tone_profile.get("humor_enabled"):
+            system_prompt_parts.append(
+                "Humor leve é permitido quando apropriado, mas jamais minimize problemas do cliente."
+            )
         system_prompt_parts.append(
             "Se não compreender a mensagem, ofereça ajuda humana de forma empática."
         )
+        system_prompt_parts.append(
+            f"Intenção atual detectada: {intention}. Ajuste o fluxo da conversa a partir disso."
+        )
         system_prompt = " ".join(system_prompt_parts)
+
+        contexto_recente = f" Contexto recente: {dialogue_summary}." if dialogue_summary else ""
+        empatia_texto = ""
+        if sentiment_label == "negative":
+            empatia_texto = "Sinto muito pelo transtorno. "
+        elif sentiment_label == "positive":
+            empatia_texto = "Que ótima notícia! "
+
+        humor_extra = ""
+        if tone_profile.get("humor_enabled") and sentiment_label == "positive":
+            humor_extra = " 😄"
 
         template_vars: dict[str, str] = {
             "nome": str(nome),
@@ -426,6 +673,14 @@ class ContextEngine:
             "resposta": "",
             "transferencia": settings.transfer_to_human_message,
             "tom": str(tone),
+            "contexto_recente": contexto_recente,
+            "empatia_texto": empatia_texto,
+            "humor_extra": humor_extra,
+            "sentimento": sentiment_label,
+            "intencao": intention,
+            "grau_formalidade": str(tone_profile["formality_level"]),
+            "grau_empatia": str(tone_profile["empathy_level"]),
+            "humor_ativo": "sim" if tone_profile.get("humor_enabled") else "não",
         }
         if saudacao:
             template_vars["frase_inicial"] = saudacao
@@ -438,7 +693,21 @@ class ContextEngine:
             profile=profile,
             personalization=config,
             ai_enabled=bool(config.get("ai_enabled", True)),
+            sentiment=sentiment_label,
+            sentiment_score=sentiment_score,
+            intention=intention,
+            template_name=self._select_template_name(intention, sentiment_label),
+            tone_profile=tone_profile,
+            feedback=feedback,
         )
+
+    def build_llm_context(self, runtime_context: RuntimeContext) -> list[dict[str, str]]:
+        messages: list[dict[str, str]] = [{"role": "system", "body": runtime_context.system_prompt}]
+        contexto = runtime_context.template_vars.get("contexto_recente") if runtime_context.template_vars else ""
+        if contexto:
+            messages.append({"role": "system", "body": contexto.strip()})
+        messages.extend(runtime_context.history)
+        return messages
 
     def record_history(
         self,

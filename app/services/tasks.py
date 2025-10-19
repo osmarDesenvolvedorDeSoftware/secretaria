@@ -152,7 +152,7 @@ def process_incoming_message(number: str, body: str, kind: str, correlation_id: 
             runtime_context = service.context_engine.prepare_runtime_context(number, sanitized)
             history_messages = list(runtime_context.history)
             context_messages_for_db = list(history_messages)
-            llm_context = [{"role": "system", "body": runtime_context.system_prompt}] + history_messages
+            llm_context = service.context_engine.build_llm_context(runtime_context)
             template_vars = dict(runtime_context.template_vars)
             previous_subject = runtime_context.profile.get("last_subject") if runtime_context.profile else None
             default_subject = previous_subject or sanitized
@@ -163,6 +163,9 @@ def process_incoming_message(number: str, body: str, kind: str, correlation_id: 
                 template_vars["último_assunto"] = template_vars["ultimo_assunto"]
             template_vars["mensagem_usuario"] = sanitized
             user_message = sanitized
+            selected_template = runtime_context.template_name or "default"
+            if not service.context_engine.template_exists(selected_template):
+                selected_template = "default"
 
             if detect_prompt_injection(sanitized):
                 logger.warning("prompt_injection_detected")
@@ -193,7 +196,7 @@ def process_incoming_message(number: str, body: str, kind: str, correlation_id: 
                 else:
                     template_vars["resposta"] = response_text
                     if response_text and response_text.strip():
-                        final_message = service.context_engine.render_template("default", template_vars)
+                        final_message = service.context_engine.render_template(selected_template, template_vars)
                     else:
                         final_message = service.context_engine.render_template("fallback", template_vars)
                         fallback_transfers_total.inc()
@@ -250,6 +253,10 @@ def process_incoming_message(number: str, body: str, kind: str, correlation_id: 
                             fetched_history = service.context_engine.get_history(number)
                             if fetched_history:
                                 updated_history = fetched_history
+                            preferences = dict(runtime_context.profile.get("preferences") or {})
+                            preferences["ultimo_sentimento"] = runtime_context.sentiment
+                            preferences["ultima_intencao"] = runtime_context.intention
+                            runtime_context.profile["preferences"] = preferences
                             runtime_context.profile = service.context_engine.update_profile_snapshot(
                                 number,
                                 user_message,

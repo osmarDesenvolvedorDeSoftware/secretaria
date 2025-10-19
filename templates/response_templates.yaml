@@ -1,9 +1,53 @@
 default:
-  template: "{{saudacao}} {{nome}}! {{resposta}}{{produto}}{{último_assunto}}"
+  template: "{{saudacao}} {{nome}}! {{empatia_texto}}{{resposta}}{{humor_extra}}{{produto}}{{contexto_recente}}{{último_assunto}}"
   defaults:
     saudacao: "Olá"
     produto: ""
     último_assunto: ""
+    contexto_recente: ""
+    empatia_texto: ""
+    humor_extra: ""
+greeting:
+  template: "{{saudacao}} {{nome}}! {{empatia_texto}}{{resposta}}{{humor_extra}}{{contexto_recente}}"
+  defaults:
+    contexto_recente: ""
+    empatia_texto: ""
+    humor_extra: ""
+doubt:
+  template: "{{saudacao}} {{nome}}! {{empatia_texto}}{{resposta}} Posso ajudar em mais algum detalhe?{{humor_extra}}"
+  defaults:
+    empatia_texto: ""
+    humor_extra: ""
+closing:
+  template: "{{saudacao}} {{nome}}! {{empatia_texto}}Fico feliz em ajudar. {{resposta}}{{humor_extra}}"
+  defaults:
+    empatia_texto: ""
+    humor_extra: ""
+urgency:
+  template: "{{saudacao}} {{nome}}! {{empatia_texto}}Vamos priorizar isso agora mesmo. {{resposta}}{{humor_extra}} {{transferencia}}"
+  defaults:
+    empatia_texto: ""
+    humor_extra: ""
+acknowledgement:
+  template: "{{saudacao}} {{nome}}! {{empatia_texto}}{{resposta}}{{contexto_recente}}"
+  defaults:
+    contexto_recente: ""
+    empatia_texto: ""
+confirmation:
+  template: "{{saudacao}} {{nome}}! {{empatia_texto}}Perfeito, seguimos alinhados. {{resposta}}{{humor_extra}}"
+  defaults:
+    empatia_texto: ""
+    humor_extra: ""
+sentiment_positive:
+  template: "{{saudacao}} {{nome}}! {{empatia_texto}}{{resposta}}{{humor_extra}}{{contexto_recente}}"
+  defaults:
+    empatia_texto: ""
+    humor_extra: ""
+    contexto_recente: ""
+sentiment_negative:
+  template: "{{saudacao}} {{nome}}, entendo sua preocupação. {{empatia_texto}}{{resposta}} Caso prefira, posso te colocar com o time humano."
+  defaults:
+    empatia_texto: ""
 fallback:
   template: "{{nome}}, não entendi, posso te redirecionar pro atendente?"
 ai_disabled:

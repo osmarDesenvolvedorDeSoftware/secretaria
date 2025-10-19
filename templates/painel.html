@@ -42,24 +42,45 @@
           <h5 class="card-title">Configurações de Personalização</h5>
           <div id="config-alert" class="alert alert-info d-none" role="alert"></div>
           <form id="form-config" class="row g-3">
-            <div class="col-md-4">
-              <label for="config-tone" class="form-label">Tom de voz</label>
-              <select id="config-tone" class="form-select">
-                <option value="amigavel">Amigável</option>
-                <option value="formal">Formal</option>
-                <option value="informal">Informal</option>
-                <option value="tecnico">Técnico</option>
-              </select>
+            <div class="col-md-6">
+              <label class="form-label d-block">Tom de voz</label>
+              <div class="btn-group w-100" role="group" aria-label="Tom de voz" id="tone-group">
+                <input type="radio" class="btn-check" name="tone-option" id="tone-amigavel" data-tone-value="amigavel" autocomplete="off">
+                <label class="btn btn-outline-primary" for="tone-amigavel">Amigável</label>
+                <input type="radio" class="btn-check" name="tone-option" id="tone-formal" data-tone-value="formal" autocomplete="off">
+                <label class="btn btn-outline-primary" for="tone-formal">Formal</label>
+                <input type="radio" class="btn-check" name="tone-option" id="tone-informal" data-tone-value="informal" autocomplete="off">
+                <label class="btn btn-outline-primary" for="tone-informal">Informal</label>
+                <input type="radio" class="btn-check" name="tone-option" id="tone-tecnico" data-tone-value="tecnico" autocomplete="off">
+                <label class="btn btn-outline-primary" for="tone-tecnico">Técnico</label>
+              </div>
+              <input type="hidden" id="config-tone" value="amigavel">
             </div>
-            <div class="col-md-4">
+            <div class="col-md-3">
               <label for="config-limit" class="form-label">Limite de mensagens no contexto</label>
               <input type="number" min="1" class="form-control" id="config-limit" value="5">
             </div>
-            <div class="col-md-4 d-flex align-items-end">
-              <div class="form-check">
+            <div class="col-md-3 d-flex align-items-end">
+              <div class="form-check form-switch">
                 <input class="form-check-input" type="checkbox" id="config-ai-enabled" checked>
                 <label class="form-check-label" for="config-ai-enabled">
                   IA ativada
+                </label>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <label for="config-formality" class="form-label">Nível de formalidade <span id="formality-display" class="badge bg-light text-dark">50</span></label>
+              <input type="range" class="form-range" id="config-formality" min="0" max="100" value="50">
+            </div>
+            <div class="col-md-6">
+              <label for="config-empathy" class="form-label">Grau de empatia <span id="empathy-display" class="badge bg-light text-dark">70</span></label>
+              <input type="range" class="form-range" id="config-empathy" min="0" max="100" value="70">
+            </div>
+            <div class="col-md-4 d-flex align-items-end">
+              <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="config-humor" checked>
+                <label class="form-check-label" for="config-humor">
+                  Humor adaptativo
                 </label>
               </div>
             </div>
@@ -74,10 +95,108 @@
         </div>
       </div>
 
+      <div id="preview-card" class="card shadow-sm mb-4 d-none">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center">
+            <h5 class="card-title mb-0">Pré-visualização de resposta</h5>
+            <span class="badge bg-secondary" id="preview-intention">Intenção: -</span>
+          </div>
+          <p class="mt-3 mb-0 text-muted" id="preview-message">Aguarde carregar as preferências...</p>
+        </div>
+      </div>
+
       <div id="lista" class="row g-3"></div>
     </div>
     <script>
       let authToken = localStorage.getItem('panel_token') || '';
+      const toneInputs = document.querySelectorAll('#tone-group input[type="radio"]');
+      const formalityRange = document.getElementById('config-formality');
+      const empathyRange = document.getElementById('config-empathy');
+      const previewCard = document.getElementById('preview-card');
+      const previewMessage = document.getElementById('preview-message');
+      const previewIntention = document.getElementById('preview-intention');
+
+      function updateSliderDisplays() {
+        const formalityDisplay = document.getElementById('formality-display');
+        const empathyDisplay = document.getElementById('empathy-display');
+        if (formalityDisplay && formalityRange) {
+          formalityDisplay.textContent = formalityRange.value;
+        }
+        if (empathyDisplay && empathyRange) {
+          empathyDisplay.textContent = empathyRange.value;
+        }
+      }
+
+      function applyToneSelection(value, options = {}) {
+        const toneHidden = document.getElementById('config-tone');
+        toneHidden.value = value;
+        toneInputs.forEach((input) => {
+          const isActive = input.dataset.toneValue === value;
+          input.checked = isActive;
+          const label = input.nextElementSibling;
+          if (label) {
+            if (isActive) {
+              label.classList.add('active', 'btn-primary');
+              label.classList.remove('btn-outline-primary');
+            } else {
+              label.classList.remove('active', 'btn-primary');
+              label.classList.add('btn-outline-primary');
+            }
+          }
+        });
+        if (!options.silent && authToken) {
+          updatePreview();
+        }
+      }
+
+      function updatePreview(intentionLabel = 'seguimento') {
+        if (!previewCard) {
+          return;
+        }
+        if (!authToken) {
+          previewCard.classList.add('d-none');
+          previewMessage.textContent = 'Aguarde carregar as preferências...';
+          previewIntention.textContent = 'Intenção: -';
+          return;
+        }
+        updateSliderDisplays();
+        const tone = document.getElementById('config-tone').value || 'amigavel';
+        const formality = parseInt(formalityRange.value, 10) || 0;
+        const empathy = parseInt(empathyRange.value, 10) || 0;
+        const humor = document.getElementById('config-humor').checked;
+        previewIntention.textContent = `Intenção: ${intentionLabel}`;
+        const saudacoes = {
+          amigavel: 'Olá',
+          formal: 'Prezado',
+          informal: 'E aí',
+          tecnico: 'Olá',
+        };
+        const saudacao = saudacoes[tone] || 'Olá';
+        let corpo = '';
+        if (empathy >= 70) {
+          corpo += 'Entendo como isso pode ser chato e estou aqui para ajudar. ';
+        } else if (empathy >= 40) {
+          corpo += 'Pode deixar que acompanho tudo de perto. ';
+        } else {
+          corpo += 'Vamos resolver isso rapidinho. ';
+        }
+        if (formality >= 70) {
+          corpo += 'Para prosseguirmos, poderia confirmar o número do pedido? ';
+        } else if (formality >= 40) {
+          corpo += 'Você pode me confirmar o número do pedido, por favor? ';
+        } else {
+          corpo += 'Me passa o número do pedido pra eu agilizar por aqui? ';
+        }
+        let humorExtra = '';
+        if (humor && empathy > 40 && tone !== 'tecnico') {
+          humorExtra = ' 😄';
+        }
+        const fechamento = empathy >= 60
+          ? 'Qualquer novidade, fico por aqui com você.'
+          : 'Conte comigo para o próximo passo.';
+        previewMessage.textContent = `${saudacao} Maria! ${corpo}${fechamento}${humorExtra}`;
+        previewCard.classList.remove('d-none');
+      }
 
       function setAuthToken(token) {
         authToken = token;
@@ -88,6 +207,7 @@
           localStorage.setItem('panel_token', authToken);
           logoutButton.classList.remove('d-none');
           document.getElementById('login-card').classList.add('d-none');
+          updatePreview();
         } else {
           localStorage.removeItem('panel_token');
           logoutButton.classList.add('d-none');
@@ -96,6 +216,9 @@
           document.getElementById('form-config').reset();
           configAlert.classList.add('d-none');
           configAlert.textContent = '';
+          applyToneSelection('amigavel', { silent: true });
+          updateSliderDisplays();
+          updatePreview();
         }
       }
 
@@ -165,8 +288,10 @@
       async function carregarConfig() {
         const configCard = document.getElementById('config-card');
         const configAlert = document.getElementById('config-alert');
+        const previewIntention = document.getElementById('preview-intention');
         if (!ensureAuthentication()) {
           configCard.classList.add('d-none');
+          previewCard.classList.add('d-none');
           return;
         }
 
@@ -184,26 +309,59 @@
             throw new Error('Não foi possível carregar as configurações.');
           }
           const data = await resposta.json();
-          document.getElementById('config-tone').value = data.tone_of_voice || 'amigavel';
+          applyToneSelection(data.tone_of_voice || 'amigavel', { silent: true });
           document.getElementById('config-limit').value = data.message_limit || 5;
           document.getElementById('config-phrases').value = Array.isArray(data.opening_phrases)
             ? data.opening_phrases.join('\n')
             : '';
           document.getElementById('config-ai-enabled').checked = Boolean(data.ai_enabled);
+          const formalityValue = parseInt(data.formality_level, 10);
+          const empathyValue = parseInt(data.empathy_level, 10);
+          formalityRange.value = Number.isFinite(formalityValue) ? formalityValue : 50;
+          empathyRange.value = Number.isFinite(empathyValue) ? empathyValue : 70;
+          document.getElementById('config-humor').checked = Boolean(data.adaptive_humor);
+          updateSliderDisplays();
+          updatePreview();
+          previewIntention.textContent = 'Intenção: seguimento';
           configAlert.classList.add('d-none');
           configAlert.textContent = '';
           configCard.classList.remove('d-none');
+          previewCard.classList.remove('d-none');
         } catch (erro) {
           configAlert.className = 'alert alert-warning';
           configAlert.textContent = erro.message;
           configAlert.classList.remove('d-none');
           configCard.classList.remove('d-none');
+          previewCard.classList.add('d-none');
         }
       }
 
       document.getElementById('btn-refresh').addEventListener('click', () => {
         carregar();
         carregarConfig();
+      });
+      toneInputs.forEach((input) => {
+        input.addEventListener('change', (event) => {
+          const value = event.target.dataset.toneValue || 'amigavel';
+          applyToneSelection(value);
+        });
+      });
+      formalityRange.addEventListener('input', () => {
+        updateSliderDisplays();
+        if (authToken) {
+          updatePreview();
+        }
+      });
+      empathyRange.addEventListener('input', () => {
+        updateSliderDisplays();
+        if (authToken) {
+          updatePreview();
+        }
+      });
+      document.getElementById('config-humor').addEventListener('change', () => {
+        if (authToken) {
+          updatePreview();
+        }
       });
       document.getElementById('form-login').addEventListener('submit', async (event) => {
         event.preventDefault();
@@ -256,6 +414,9 @@
           .map((linha) => linha.trim())
           .filter((linha) => linha.length > 0);
         const aiEnabled = document.getElementById('config-ai-enabled').checked;
+        const formalityLevel = parseInt(formalityRange.value, 10) || 50;
+        const empathyLevel = parseInt(empathyRange.value, 10) || 70;
+        const adaptiveHumor = document.getElementById('config-humor').checked;
 
         try {
           const resposta = await fetch('/painel/config', {
@@ -269,6 +430,9 @@
               message_limit: messageLimit,
               opening_phrases: openingPhrases,
               ai_enabled: aiEnabled,
+              formality_level: formalityLevel,
+              empathy_level: empathyLevel,
+              adaptive_humor: adaptiveHumor,
             }),
           });
           if (resposta.status === 401) {
@@ -282,6 +446,7 @@
           configAlert.className = 'alert alert-success';
           configAlert.textContent = 'Configurações atualizadas com sucesso!';
           configAlert.classList.remove('d-none');
+          updatePreview();
         } catch (erro) {
           configAlert.className = 'alert alert-danger';
           configAlert.textContent = erro.message;
@@ -296,6 +461,8 @@
         document.getElementById('alerta').classList.add('d-none');
       });
 
+      applyToneSelection(document.getElementById('config-tone').value || 'amigavel', { silent: true });
+      updateSliderDisplays();
       setAuthToken(authToken);
       carregar();
       carregarConfig();

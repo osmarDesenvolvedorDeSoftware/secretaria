@@ -48,6 +48,9 @@ def _panel_config_payload(config: PersonalizationConfig) -> dict[str, object]:
         "message_limit": data.get("message_limit", 5),
         "opening_phrases": phrases,
         "ai_enabled": bool(data.get("ai_enabled", True)),
+        "formality_level": int(data.get("formality_level", 50) or 50),
+        "empathy_level": int(data.get("empathy_level", 70) or 70),
+        "adaptive_humor": bool(data.get("adaptive_humor", True)),
     }
 
 
@@ -105,6 +108,21 @@ def update_panel_config():
         phrases = []
 
     ai_enabled = bool(payload.get("ai_enabled", True))
+    formality_level = payload.get("formality_level", 50)
+    empathy_level = payload.get("empathy_level", 70)
+    adaptive_humor = bool(payload.get("adaptive_humor", True))
+
+    try:
+        formality_level = int(formality_level)
+    except (TypeError, ValueError):
+        formality_level = 50
+    formality_level = max(0, min(100, formality_level))
+
+    try:
+        empathy_level = int(empathy_level)
+    except (TypeError, ValueError):
+        empathy_level = 70
+    empathy_level = max(0, min(100, empathy_level))
 
     with get_db_session(current_app) as session:
         config = _get_panel_config(session)
@@ -112,6 +130,9 @@ def update_panel_config():
         config.message_limit = message_limit
         config.opening_phrases = phrases
         config.ai_enabled = ai_enabled
+        config.formality_level = formality_level
+        config.empathy_level = empathy_level
+        config.adaptive_humor = adaptive_humor
         session.add(config)
         session.flush()
         response_payload = _panel_config_payload(config)
