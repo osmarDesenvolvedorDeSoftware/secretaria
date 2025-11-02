@@ -593,6 +593,9 @@ def process_incoming_message(
         number=number,
         kind=kind,
     )
+    # LOG ADICIONADO: Confirma que o job RQ começou a ser executado
+    logger.info("TASK_START", correlation_id=correlation_id)
+
     start_time = time.time()
 
     redis_client: Redis = current_app.redis  # type: ignore[attr-defined]
@@ -724,6 +727,10 @@ def process_incoming_message(
             else:
                 response_text = ""
                 llm_status = "started"
+                
+                # LOG ADICIONADO: Loga o que está sendo enviado para a IA (DEBUG)
+                logger.debug("LLM_PROMPT_PREP", prompt_length=len(sanitized), context_messages=len(llm_context))
+
                 try:
                     response_text = service.llm_client.generate_reply(
                         sanitized,
