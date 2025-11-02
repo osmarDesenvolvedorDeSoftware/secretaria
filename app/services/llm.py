@@ -102,19 +102,31 @@ class LLMClient:
             return "Desculpe, não posso executar esse tipo de comando."
 
         messages = context[-settings.context_max_messages :] + [{"role": "user", "body": text}]
+        formatted_context = []
+        for item in messages:
+            role = item.get("role", "user")
+            body = item.get("body", "")
+            if body:
+                formatted_context.append(f"{role}: {body}")
+        combined_text = f"{system_prompt}\n\n" + "\n".join(formatted_context)
         payload = {
-            "system_prompt": system_prompt,
-            "messages": messages,
+            "contents": [
+                {
+                    "parts": [
+                        {"text": combined_text}
+                    ]
+                }
+            ]
         }
         headers = {
-            "Authorization": f"Bearer {settings.gemini_api_key}",
+            "x-goog-api-key": settings.gemini_api_key,
             "Content-Type": "application/json",
         }
 
         start = time.time()
         try:
             response = requests.post(
-                "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent",
+                "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
                 headers=headers,
                 json=payload,
                 timeout=settings.llm_timeout_seconds,
