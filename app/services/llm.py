@@ -93,6 +93,9 @@ class LLMClient:
         context: list[dict[str, str]],
         system_prompt: str = "Você é uma assistente virtual da secretaria, responda de forma educada e objetiva.",
     ) -> str:
+        # LOG ADICIONADO: Confirma que a tentativa de chamada LLM começou
+        self.logger.info("LLM_ATTEMPT_START")
+
         if not self.circuit_breaker.allow():
             raise LLMError("Circuit breaker aberto")
 
@@ -124,19 +127,46 @@ class LLMClient:
         }
 
         start = time.time()
+        url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+        
+        # LOG ADICIONADO: Loga o URL e tamanho do prompt para debug
+        self.logger.debug(
+            "LLM_REQUEST_PREP",
+            url=url,
+            prompt_size=len(combined_text),
+            context_messages=len(context) + 1,
+        )
+
         try:
             response = requests.post(
-                "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+                url,
                 headers=headers,
                 json=payload,
                 timeout=settings.llm_timeout_seconds,
             )
+            
+            # LOG ADICIONADO: Loga o status HTTP da resposta
+            self.logger.info("LLM_HTTP_RESPONSE", status_code=response.status_code)
+            
             if response.status_code >= 400:
+                # LOG CRÍTICO: Registra o erro de status da API com o corpo da resposta
+                self.logger.error(
+                    "LLM_API_ERROR_BODY",
+                    status_code=response.status_code,
+                    response_text=response.text[:512],
+                )
                 self.circuit_breaker.record_failure()
                 raise LLMError(f"Gemini returned status {response.status_code}")
+            
             data: Any = response.json()
+            
+            # LOG ADICIONADO: Loga o sucesso de decodificação JSON
+            self.logger.debug("LLM_JSON_DECODED")
+            
             candidates = data.get("candidates")
             if not candidates:
+                # LOG ADICIONADO: Captura a resposta em caso de candidatos ausentes
+                self.logger.error("LLM_CANDIDATES_MISSING", response_data=data)
                 raise LLMError("Resposta inválida do LLM")
             text_output = candidates[0].get("content", {}).get("parts", [{}])[0].get("text")
             if not text_output:
