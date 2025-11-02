@@ -642,6 +642,7 @@ def process_incoming_message(
         history_messages: list[dict[str, str]] = []
         template_vars: dict[str, str] = {}
         context_messages_for_db: list[dict[str, str]] = []
+        llm_status = "not_started"
         success = False
         delivery_status = "FAILED_TEMPORARY"
         error_detail = None
@@ -705,6 +706,7 @@ def process_incoming_message(
             if agenda_override:
                 final_message = str(agenda_message)
                 template_vars["resposta"] = final_message
+                llm_status = "agenda_override"
             elif detect_prompt_injection(sanitized):
                 logger.warning("prompt_injection_detected")
                 llm_prompt_injection_blocked_total.labels(
@@ -713,12 +715,15 @@ def process_incoming_message(
                 template_vars["resposta"] = ""
                 final_message = service.context_engine.render_template("fallback", template_vars)
                 fallback_transfers_total.labels(company=service.company_label).inc()
+                llm_status = "blocked"
             elif not runtime_context.ai_enabled:
                 template_vars["resposta"] = ""
                 final_message = service.context_engine.render_template("ai_disabled", template_vars)
                 fallback_transfers_total.labels(company=service.company_label).inc()
+                llm_status = "ai_disabled"
             else:
                 response_text = ""
+                llm_status = "started"
                 try:
                     response_text = service.llm_client.generate_reply(
                         sanitized,
@@ -729,16 +734,25 @@ def process_incoming_message(
                     template_vars["resposta"] = ""
                     final_message = service.context_engine.render_template("technical_issue", template_vars)
                     fallback_transfers_total.labels(company=service.company_label).inc()
+                    llm_status = "error"
                 else:
                     template_vars["resposta"] = response_text
                     if response_text and response_text.strip():
                         final_message = service.context_engine.render_template(selected_template, template_vars)
+                        llm_status = "success"
                     else:
                         final_message = service.context_engine.render_template("fallback", template_vars)
                         fallback_transfers_total.labels(company=service.company_label).inc()
+                        llm_status = "empty"
 
             context_messages_for_db.append({"role": "user", "body": user_message})
             context_messages_for_db.append({"role": "assistant", "body": final_message})
+            logger.info(
+                "llm_response_status",
+                status=llm_status,
+                has_response=bool(template_vars.get("resposta", "").strip()),
+                response_chars=len((template_vars.get("resposta") or "")),
+            )
             response_time_for_analytics: float | None = None
             outbound_tokens = 0
             if final_message:
@@ -815,6 +829,13 @@ def process_incoming_message(
                 service._update_delivery_ratio(False)
                 raise
             finally:
+                logger.info(
+                    "whatsapp_send_status",
+                    status=delivery_status,
+                    external_id=external_id,
+                    attempt=attempt,
+                    success=success,
+                )
                 session = session_factory()  # type: ignore[operator]
                 try:
                     if success:
