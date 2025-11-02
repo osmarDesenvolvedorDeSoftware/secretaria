@@ -37,7 +37,10 @@ def validate_hmac(
     *,
     skew_seconds: int = 300,
 ) -> bool:
-    if not secret or not timestamp or not signature:
+    if not secret:
+        return True
+
+    if not timestamp or not signature:
         return False
 
     try:
