@@ -5,6 +5,7 @@ import argparse
 import redis
 from rq import Connection, Worker
 
+from app import init_app
 from app.config import settings
 
 
@@ -27,6 +28,9 @@ if __name__ == "__main__":
     queue_names = args.queues if args.queues else [settings.queue_name]
 
     redis_conn = redis.from_url(settings.redis_url)
-    with Connection(redis_conn):
-        worker = Worker(queue_names)
-        worker.work(burst=args.burst)
+    app = init_app()
+
+    with app.app_context():
+        with Connection(redis_conn):
+            worker = Worker(queue_names)
+            worker.work(burst=args.burst)

@@ -31,7 +31,15 @@ class AnalyticsReport(Base):
         nullable=False,
         index=True,
     )
-    granularity = Column(SAEnum(AnalyticsGranularity), nullable=False)
+    granularity = Column(
+        SAEnum(
+            AnalyticsGranularity,
+            values_callable=lambda enum: [member.value for member in enum],
+            name="analyticsgranularity",
+            create_type=False,
+        ),
+        nullable=False,
+    )
     period_start = Column(DateTime, nullable=False, index=True)
     period_end = Column(DateTime, nullable=False)
     messages_inbound = Column(Integer, nullable=False, default=0)
