@@ -10,7 +10,7 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0009_appointments_reminders_reschedule"
+revision = "0009_appt_reminders"
 down_revision = "0008_agenda_cal_integration"
 branch_labels = None
 depends_on = None

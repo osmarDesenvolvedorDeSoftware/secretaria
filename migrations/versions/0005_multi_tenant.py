@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision = "0005_multi_tenant"
@@ -12,15 +13,46 @@ branch_labels = None
 depends_on = None
 
 
-company_status_enum = sa.Enum("ativo", "suspenso", "cancelado", name="company_status")
-subscription_status_enum = sa.Enum(
-    "ativa", "pendente", "cancelada", "suspensa", name="subscription_status"
+company_status_enum = postgresql.ENUM(
+    "ativo",
+    "suspenso",
+    "cancelado",
+    name="company_status",
+    create_type=False,
+)
+subscription_status_enum = postgresql.ENUM(
+    "ativa",
+    "pendente",
+    "cancelada",
+    "suspensa",
+    name="subscription_status",
+    create_type=False,
 )
 
 
 def upgrade() -> None:
-    company_status_enum.create(op.get_bind(), checkfirst=True)
-    subscription_status_enum.create(op.get_bind(), checkfirst=True)
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            CREATE TYPE company_status AS ENUM ('ativo', 'suspenso', 'cancelado');
+        EXCEPTION
+            WHEN duplicate_object THEN NULL;
+        END;
+        $$;
+        """
+    )
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            CREATE TYPE subscription_status AS ENUM ('ativa', 'pendente', 'cancelada', 'suspensa');
+        EXCEPTION
+            WHEN duplicate_object THEN NULL;
+        END;
+        $$;
+        """
+    )
 
     op.create_table(
         "plans",
@@ -150,10 +182,8 @@ def upgrade() -> None:
         )
 
     # Drop old unique constraint on number for customer_contexts
-    op.drop_constraint(
-        "customer_contexts_number_key",
-        "customer_contexts",
-        type_="unique",
+    op.execute(
+        "ALTER TABLE customer_contexts DROP CONSTRAINT IF EXISTS customer_contexts_number_key"
     )
 
     op.create_unique_constraint(
@@ -209,5 +239,5 @@ def downgrade() -> None:
     op.drop_table("companies")
     op.drop_table("plans")
 
-    subscription_status_enum.drop(op.get_bind(), checkfirst=True)
-    company_status_enum.drop(op.get_bind(), checkfirst=True)
+    op.execute("DROP TYPE IF EXISTS subscription_status")
+    op.execute("DROP TYPE IF EXISTS company_status")

@@ -215,13 +215,19 @@ def init_app() -> Flask:
             label = str(company.id)
             seen_companies.add(label)
             queue_obj = get_task_queue(company.id)
-            queue_size = queue_obj.count() if hasattr(queue_obj, "count") else 0
+            queue_count = getattr(queue_obj, "count", None)
+            if callable(queue_count):
+                queue_size = queue_count()
+            else:
+                queue_size = int(queue_count or 0)
             queue_gauge.labels(company=label).set(queue_size)
 
             dead_letter_obj = get_dead_letter_queue(company.id)
-            dead_letter_size = (
-                dead_letter_obj.count() if hasattr(dead_letter_obj, "count") else 0
-            )
+            dl_count = getattr(dead_letter_obj, "count", None)
+            if callable(dl_count):
+                dead_letter_size = dl_count()
+            else:
+                dead_letter_size = int(dl_count or 0)
             dead_letter_queue_gauge.labels(company=label).set(dead_letter_size)
 
             worker_count = 0

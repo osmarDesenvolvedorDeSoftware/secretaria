@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision = "0006_analytics_reports"
@@ -12,11 +13,23 @@ branch_labels = None
 depends_on = None
 
 
-analytics_granularity_enum = sa.Enum("daily", "weekly", name="analyticsgranularity")
+analytics_granularity_enum = postgresql.ENUM(
+    "daily", "weekly", name="analyticsgranularity", create_type=False
+)
 
 
 def upgrade() -> None:
-    analytics_granularity_enum.create(op.get_bind(), checkfirst=True)
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            CREATE TYPE analyticsgranularity AS ENUM ('daily', 'weekly');
+        EXCEPTION
+            WHEN duplicate_object THEN NULL;
+        END;
+        $$;
+        """
+    )
 
     op.create_table(
         "analytics_reports",
@@ -54,4 +67,4 @@ def downgrade() -> None:
     op.drop_index("ix_analytics_reports_period_start", table_name="analytics_reports")
     op.drop_index("ix_analytics_reports_company_id", table_name="analytics_reports")
     op.drop_table("analytics_reports")
-    analytics_granularity_enum.drop(op.get_bind(), checkfirst=True)
+    op.execute("DROP TYPE IF EXISTS analyticsgranularity")

@@ -8,8 +8,8 @@ import sqlalchemy as sa
 from alembic import op
 
 
-revision = "0010_scheduling_ai_optimization"
-down_revision = "0009_appointments_reminders_reschedule"
+revision = "0010_scheduling_ai_opt"
+down_revision = "0009_appt_reminders"
 branch_labels = None
 depends_on = None
 
@@ -37,10 +37,9 @@ def upgrade() -> None:
         "scheduling_insights",
         ["company_id"],
     )
-    op.execute(
-        sa.text(
-            "UPDATE scheduling_insights SET updated_at = :now",
-        ),
+    bind = op.get_bind()
+    bind.execute(
+        sa.text("UPDATE scheduling_insights SET updated_at = :now"),
         {"now": datetime.utcnow()},
     )
 

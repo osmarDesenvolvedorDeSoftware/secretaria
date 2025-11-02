@@ -4,8 +4,8 @@ import sqlalchemy as sa
 from alembic import op
 
 
-revision = "0011_followup_post_appointment"
-down_revision = "0010_scheduling_ai_optimization"
+revision = "0011_followup_post_appt"
+down_revision = "0010_scheduling_ai_opt"
 branch_labels = None
 depends_on = None
 
@@ -36,9 +36,10 @@ def upgrade() -> None:
             nullable=True,
         ),
     )
-    op.execute(
+    bind = op.get_bind()
+    bind.execute(
         sa.text(
-            "UPDATE appointments SET allow_followup = :value WHERE allow_followup IS NULL",
+            "UPDATE appointments SET allow_followup = :value WHERE allow_followup IS NULL"
         ),
         {"value": True},
     )
