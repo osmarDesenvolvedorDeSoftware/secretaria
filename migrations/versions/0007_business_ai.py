@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision = "0007_business_ai"
@@ -12,11 +13,28 @@ branch_labels = None
 depends_on = None
 
 
-abtest_status_enum = sa.Enum("draft", "running", "stopped", "completed", name="abtest_status")
+abtest_status_enum = postgresql.ENUM(
+    "draft",
+    "running",
+    "stopped",
+    "completed",
+    name="abtest_status",
+    create_type=False,
+)
 
 
 def upgrade() -> None:
-    abtest_status_enum.create(op.get_bind(), checkfirst=True)
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            CREATE TYPE abtest_status AS ENUM ('draft', 'running', 'stopped', 'completed');
+        EXCEPTION
+            WHEN duplicate_object THEN NULL;
+        END;
+        $$;
+        """
+    )
 
     op.create_table(
         "ab_tests",
@@ -108,4 +126,4 @@ def downgrade() -> None:
     op.drop_index("ix_ab_tests_company_id", table_name="ab_tests")
     op.drop_table("ab_tests")
 
-    abtest_status_enum.drop(op.get_bind(), checkfirst=True)
+    op.execute("DROP TYPE IF EXISTS abtest_status")
