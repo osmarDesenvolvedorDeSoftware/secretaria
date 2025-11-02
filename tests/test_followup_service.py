@@ -1,6 +1,6 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
-from app.models import Appointment, AuditLog
+from app.models import Appointment, AuditLog, FeedbackEvent
 from app.services import followup_service
 from app.metrics import (
     appointment_followups_negative_total,
@@ -34,23 +34,34 @@ def test_agendar_followup_enqueues_job(app) -> None:
         appointment = _create_appointment(session)
         appointment_id = appointment.id
         company_id = appointment.company_id
+
+        expected_time = (appointment.end_time or datetime.utcnow())
+        expected_time = expected_time.replace(tzinfo=timezone.utc) + timedelta(hours=1)
+        expected_time_naive = expected_time.astimezone(timezone.utc).replace(tzinfo=None)
         session.close()
 
         queue = app.get_task_queue(company_id)
         queue.scheduled.clear()
 
-        followup_service.agendar_followup(appointment_id)
+        followup_service.agendar_followup(appointment)
 
         assert queue.scheduled, "Follow-up deveria ser agendado no RQ"
         scheduled_time, (func, args, kwargs), meta = queue.scheduled[0]
         assert func == followup_service.enviar_followup
         assert args == (appointment_id,)
         assert meta.get("kind") == "followup"
+        assert abs((scheduled_time - expected_time_naive).total_seconds()) < 1
 
         session = app.db_session()
         stored = session.get(Appointment, appointment_id)
         assert stored is not None
         assert stored.followup_next_scheduled is not None
+        assert abs(
+            (
+                stored.followup_next_scheduled.astimezone(timezone.utc)
+                - expected_time
+            ).total_seconds()
+        ) < 1
 
 
 def test_agendar_followup_respects_consent(app) -> None:
@@ -112,6 +123,64 @@ def test_enviar_followup_updates_state_and_audit(app, monkeypatch) -> None:
             .all()
         )
         assert audit_entries, "Envio de follow-up deve registrar auditoria"
+
+
+def test_processar_resposta_interpreta_mensagens(app) -> None:
+    with app.app_context():
+        session = app.db_session()
+        appointment = _create_appointment(
+            session,
+            followup_sent_at=datetime.utcnow() - timedelta(minutes=5),
+            cal_booking_id="booking-process",
+        )
+        appointment_id = appointment.id
+        company_id = appointment.company_id
+        session.close()
+
+        positive_counter = appointment_followups_positive_total.labels(company=str(company_id))
+        negative_counter = appointment_followups_negative_total.labels(company=str(company_id))
+        positive_before = positive_counter._value.get()  # type: ignore[attr-defined]
+        negative_before = negative_counter._value.get()  # type: ignore[attr-defined]
+
+        result_positive = followup_service.processar_resposta(appointment_id, "Sim, quero marcar")
+        assert result_positive == "positive"
+
+        session = app.db_session()
+        stored = session.get(Appointment, appointment_id)
+        assert stored is not None and stored.followup_response == "positive"
+        session.close()
+        assert positive_counter._value.get() == positive_before + 1  # type: ignore[attr-defined]
+
+        result_negative = followup_service.processar_resposta(appointment_id, "Não, obrigado")
+        assert result_negative == "negative"
+
+        session = app.db_session()
+        stored = session.get(Appointment, appointment_id)
+        assert stored is not None and stored.followup_response == "negative"
+        session.close()
+        assert negative_counter._value.get() == negative_before + 1  # type: ignore[attr-defined]
+
+        feedback_text = "Foi ótimo, quero mais materiais"
+        result_feedback = followup_service.processar_resposta(appointment_id, feedback_text)
+        assert result_feedback == "feedback"
+
+        session = app.db_session()
+        stored = session.get(Appointment, appointment_id)
+        assert stored is not None and stored.followup_response == "feedback"
+        events = (
+            session.query(FeedbackEvent)
+            .filter(FeedbackEvent.company_id == company_id)
+            .order_by(FeedbackEvent.created_at.desc())
+            .all()
+        )
+        session.close()
+
+        assert events, "Resposta textual deve gerar FeedbackEvent"
+        assert any(
+            str(event.details.get("appointment_id")) == str(appointment_id)
+            for event in events
+        )
+        assert any("materiais" in (event.comment or "") for event in events)
 
 
 def test_registrar_resposta_tracks_metrics(app) -> None:

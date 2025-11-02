@@ -41,7 +41,7 @@ from app.services.persistence import (
 from app.services.security import detect_prompt_injection, sanitize_for_log, sanitize_text
 from app.services.tenancy import TenantContext, queue_name_for_company
 from app.services.whaticket import WhaticketClient, WhaticketError
-from app.models import Appointment, Company, FeedbackEvent
+from app.models import Appointment, Company
 
 
 APPOINTMENT_CONFIRMATION_WORDS = {
@@ -300,21 +300,6 @@ def _handle_agenda_flow(
                     "feedback",
                     feedback_text=sanitized_message,
                 )
-                session = session_factory()
-                try:
-                    feedback = FeedbackEvent(
-                        company_id=service.company_id,
-                        number=number,
-                        channel="whatsapp",
-                        feedback_type="followup_text",
-                        score=None,
-                        comment=sanitized_message,
-                        details={"appointment_id": recent_followup.id},
-                    )
-                    session.add(feedback)
-                    session.commit()
-                finally:
-                    session.close()
             service.context_engine.clear_agenda_state(number)
             return "Agradeço por compartilhar seu feedback! Vamos repassar à equipe."
 
