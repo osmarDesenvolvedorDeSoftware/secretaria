@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
 import logging
 import re
 from typing import Any, Tuple
+
+import structlog
 
 
 _MESSAGE_KINDS = {
@@ -19,80 +22,176 @@ _MESSAGE_KINDS = {
 
 logger = logging.getLogger(__name__)
 
-
-def _normalize_candidate(value: Any) -> str | None:
-    if not value:
-        return None
-
-    raw = str(value)
-    logger.debug("extract_number candidate before normalization: %s", raw)
-
-    main_part = raw.split("@", 1)[0]
-    digits = re.sub(r"\D", "", main_part)
-
-    logger.debug(
-        "extract_number candidate after normalization: %s", digits or "<empty>"
-    )
-
-    if len(digits) < 11:
-        return None
-
-    return digits
+_KNOWN_SUFFIXES = (
+    "@s.whatsapp.net",
+    "@lid",
+    "@g.us",
+    "@broadcast",
+)
+_DISALLOWED_SUFFIXES = {"@g.us", "@broadcast"}
 
 
-def extract_number(payload: dict[str, Any]) -> str:
-    """Extract and normalize the WhatsApp number from the payload."""
+def extract_number(payload: dict[str, Any]) -> str | None:
+    """Extract and normalize the WhatsApp number from the payload.
 
-    def _key_payload(value: Any) -> dict[str, Any]:
-        return value if isinstance(value, dict) else {}
+    The function inspects Whaticket webhook payloads and tries to identify the
+    correct WhatsApp number regardless of the transport format (lid, pn, group,
+    broadcast, proto payloads, etc.).
+    """
 
-    key_payload = _key_payload(payload.get("key"))
+    struct_logger = structlog.get_logger("extract_number")
 
-    candidate_sources: list[tuple[str, Any]] = []
+    key_value = payload.get("key")
+    key_payload = key_value if isinstance(key_value, dict) else {}
+    fields_to_check = ["remoteJid", "remoteJidAlt", "participant"]
 
-    key_remote = key_payload.get("remoteJid")
-    key_alt = key_payload.get("remoteJidAlt")
-    if key_remote and "@s.whatsapp.net" in str(key_remote):
-        candidate_sources.append(("key.remoteJid", key_remote))
-    elif not key_remote and key_alt:
-        candidate_sources.append(("key.remoteJidAlt", key_alt))
+    def _normalize(field_name: str, raw_value: Any) -> tuple[str | None, str | None]:
+        if raw_value is None:
+            return None, None
 
-    payload_remote = payload.get("remoteJid")
-    payload_alt = payload.get("remoteJidAlt")
-    if payload_remote and "@s.whatsapp.net" in str(payload_remote):
-        candidate_sources.append(("remoteJid", payload_remote))
-    elif not payload_remote and payload_alt:
-        candidate_sources.append(("remoteJidAlt", payload_alt))
-
-    candidate_sources.extend(
-        [
-            ("from", payload.get("from")),
-            ("number", payload.get("number")),
-            ("contact.number", payload.get("contact", {}).get("number")),
-            ("contact.phone", payload.get("contact", {}).get("phone")),
-            (
-                "ticket.contact.number",
-                payload.get("ticket", {}).get("contact", {}).get("number"),
-            ),
-            (
-                "ticket.contact.phone",
-                payload.get("ticket", {}).get("contact", {}).get("phone"),
-            ),
-        ]
-    )
-
-    for source, candidate in candidate_sources:
-        if not candidate:
-            continue
-        logger.debug("extract_number selected candidate %s: %s", source, candidate)
-        normalized = _normalize_candidate(candidate)
-        if normalized:
-            logger.debug(
-                "extract_number normalized candidate %s to: %s", source, normalized
+        value = str(raw_value)
+        if not any(suffix in value for suffix in _KNOWN_SUFFIXES):
+            struct_logger.debug(
+                "extract_number_skip",
+                field=field_name,
+                raw_value=value,
+                reason="missing_suffix",
+                valid=False,
             )
-            return normalized
+            return None, value
 
-    raise ValueError("could not extract whatsapp number")
+        main_part = value.split("@", 1)[0]
+        number = re.sub(r"\D", "", main_part)
+
+        if not number:
+            struct_logger.debug(
+                "extract_number_invalid",
+                field=field_name,
+                raw_value=value,
+                normalized=number,
+                reason="no_digits",
+                valid=False,
+            )
+            return None, value
+
+        suffix = next((s for s in _KNOWN_SUFFIXES if value.endswith(s)), None)
+        if suffix in _DISALLOWED_SUFFIXES:
+            struct_logger.debug(
+                "extract_number_invalid",
+                field=field_name,
+                raw_value=value,
+                normalized=number,
+                reason="disallowed_suffix",
+                valid=False,
+            )
+            return None, value
+
+        if suffix != "@s.whatsapp.net":
+            struct_logger.debug(
+                "extract_number_invalid",
+                field=field_name,
+                raw_value=value,
+                normalized=number,
+                reason="unsupported_suffix",
+                valid=False,
+            )
+            return None, value
+
+        if len(number) < 11:
+            struct_logger.debug(
+                "extract_number_invalid",
+                field=field_name,
+                raw_value=value,
+                normalized=number,
+                reason="too_short",
+                valid=False,
+            )
+            return None, value
+
+        struct_logger.debug(
+            "extract_number_success",
+            field=field_name,
+            raw_value=value,
+            normalized=number,
+            valid=True,
+        )
+        return number, value
+
+    for field in fields_to_check:
+        raw_value = key_payload.get(field)
+        number, _ = _normalize(field, raw_value)
+        if number:
+            return number
+
+    contact_value = payload.get("contact") if isinstance(payload.get("contact"), dict) else None
+    ticket_value = payload.get("ticket") if isinstance(payload.get("ticket"), dict) else None
+    ticket_contact = (
+        ticket_value.get("contact") if isinstance(ticket_value.get("contact"), dict) else None
+    ) if ticket_value else None
+
+    fallback_candidates: list[tuple[str, Any]] = [
+        ("number", payload.get("number")),
+        ("from", payload.get("from")),
+        ("contact.number", contact_value.get("number") if contact_value else None),
+        ("contact.phone", contact_value.get("phone") if contact_value else None),
+        (
+            "ticket.contact.number",
+            ticket_contact.get("number") if ticket_contact else None,
+        ),
+        (
+            "ticket.contact.phone",
+            ticket_contact.get("phone") if ticket_contact else None,
+        ),
+    ]
+
+    for field_name, raw_value in fallback_candidates:
+        if raw_value is None:
+            continue
+        value = str(raw_value)
+        digits = re.sub(r"\D", "", value)
+        if not digits:
+            struct_logger.debug(
+                "extract_number_invalid",
+                field=field_name,
+                raw_value=value,
+                normalized=digits,
+                reason="no_digits",
+                valid=False,
+            )
+            continue
+        if len(digits) < 11:
+            struct_logger.debug(
+                "extract_number_invalid",
+                field=field_name,
+                raw_value=value,
+                normalized=digits,
+                reason="too_short",
+                valid=False,
+            )
+            continue
+        struct_logger.debug(
+            "extract_number_success",
+            field=field_name,
+            raw_value=value,
+            normalized=digits,
+            valid=True,
+        )
+        return digits
+
+    # Fallback: search through the entire payload for a valid identifier.
+    payload_text = json.dumps(payload, ensure_ascii=False)
+    for match in re.finditer(r"(\d{11,})@(s\.whatsapp\.net|lid|g\.us|broadcast)", payload_text):
+        digits, suffix = match.groups()
+        raw_value = f"{digits}@{suffix}"
+        number, _ = _normalize("regex_fallback", raw_value)
+        if number:
+            return number
+
+    struct_logger.debug(
+        "extract_number_failed",
+        payload_preview=str(payload)[:500],
+    )
+    return None
 
 
 def extract_text_and_kind(payload: dict[str, Any]) -> Tuple[str, str]:

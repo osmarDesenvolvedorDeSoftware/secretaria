@@ -65,11 +65,10 @@ class IncomingWebhook(BaseModel):
 
     @classmethod
     def _normalize_payload(cls, values: dict[str, Any]) -> dict[str, Any]:
-        try:
-            number = extract_number(values)
-            text, kind = extract_text_and_kind(values)
-        except ValueError as exc:
-            raise ValueError(str(exc)) from exc
+        number = extract_number(values)
+        if not number:
+            raise ValueError("could not extract whatsapp number")
+        text, kind = extract_text_and_kind(values)
         normalized = {"number": number, "text": text, "kind": kind}
         normalized["payload_format"] = "proto" if cls._is_proto_payload(values) else "legacy"
         return {**values, **normalized}
