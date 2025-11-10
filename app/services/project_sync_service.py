@@ -47,12 +47,13 @@ def _analyze_context_with_ai(readme_content: str) -> str:
     try:
         ai_description = generate_text(prompt)
         return ai_description.strip() or "Projeto de software"
-    except Exception as exc:  # pragma: no cover - guard clause
+    except Exception as exc:  # pragma: no cover
         logger.error("Erro ao analisar contexto com IA (Gemini): %s", exc)
         return "Erro ao processar o contexto do projeto."
 
 
 def sync_github_projects_to_db(db: Session, company_id: int) -> Dict[str, object]:
+    """Sincroniza repositórios do GitHub com a tabela `projects`."""
     start_time = time.monotonic()
     logger.info("Iniciando sincronização de projetos do GitHub para company_id: %s", company_id)
     auto_sync_logger.info("Iniciando sincronização do GitHub para company_id=%s", company_id)
@@ -60,12 +61,7 @@ def sync_github_projects_to_db(db: Session, company_id: int) -> Dict[str, object
     repos = github_service.fetch_github_projects()
     if not repos:
         duration = time.monotonic() - start_time
-        logger.warning("Nenhum projeto encontrado ou erro na API do GitHub.")
-        auto_sync_logger.error(
-            "Sincronização encerrada sem projetos para company_id=%s (%.2fs)",
-            company_id,
-            duration,
-        )
+        auto_sync_logger.error("Nenhum repositório retornado pela API. Tempo: %.2fs", duration)
         return {"status": "error", "message": "Nenhum projeto encontrado ou erro na API."}
 
     new_projects_count = 0
@@ -73,8 +69,8 @@ def sync_github_projects_to_db(db: Session, company_id: int) -> Dict[str, object
 
     for repo in repos:
         repo_name = repo.get("name") or ""
-        repo_url = repo.get("url")
-        owner = repo.get("owner_login") or ""
+        repo_url = repo.get("html_url")  # ✅ usa a URL pública
+        owner = repo.get("owner", {}).get("login", "")
 
         if not repo_name or not owner:
             logger.debug("Ignorando repositório sem informações suficientes: %s", repo)
@@ -91,14 +87,14 @@ def sync_github_projects_to_db(db: Session, company_id: int) -> Dict[str, object
 
         logger.info("Processando novo projeto: %s", repo_name)
 
-        readme = github_service.fetch_repo_readme(owner=owner, repo_name=repo_name)
-        ai_description: Optional[str] = repo.get("description") or "Projeto sem descrição."
-
-        if readme:
-            logger.info("Analisando README de %s com IA...", repo_name)
-            ai_description = _analyze_context_with_ai(readme)
-        else:
-            logger.info("README não encontrado para %s. Usando descrição padrão do GitHub.", repo_name)
+        try:
+            readme = github_service.fetch_repo_readme(owner=owner, repo_name=repo_name)
+            ai_description: Optional[str] = repo.get("description") or "Projeto sem descrição."
+            if readme:
+                ai_description = _analyze_context_with_ai(readme)
+        except Exception as e:
+            logger.warning("Falha ao processar README de %s: %s", repo_name, e)
+            ai_description = "Projeto de software."
 
         new_project = Project(
             company_id=company_id,
@@ -109,20 +105,24 @@ def sync_github_projects_to_db(db: Session, company_id: int) -> Dict[str, object
             github_url=repo_url,
         )
 
-        db.add(new_project)
-        new_projects_count += 1
-        logger.info("Projeto '%s' salvo no banco de dados.", repo_name)
-
-    db.commit()
+        try:
+            db.add(new_project)
+            db.commit()  # ✅ commit individual garante persistência
+            db.refresh(new_project)
+            new_projects_count += 1
+            logger.info("Projeto '%s' salvo no banco de dados.", repo_name)
+        except Exception as e:
+            db.rollback()
+            logger.error("Erro ao salvar projeto %s: %s", repo_name, e)
 
     duration = time.monotonic() - start_time
     summary = (
         "Sincronização concluída. "
-        f"{new_projects_count} novos projetos adicionados. {skipped_count} projetos já existentes."
+        f"{new_projects_count} novos projetos adicionados. {skipped_count} já existiam."
     )
     logger.info(summary)
     auto_sync_logger.info(
-        "Sincronização finalizada para company_id=%s em %.2fs (novos=%s, ignorados=%s)",
+        "Finalizado para company_id=%s em %.2fs (novos=%s, ignorados=%s)",
         company_id,
         duration,
         new_projects_count,
