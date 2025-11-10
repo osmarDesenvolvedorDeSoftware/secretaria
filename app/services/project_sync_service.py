@@ -108,6 +108,10 @@ def sync_github_projects_to_db(db: Session, company_id: int) -> Dict[str, object
             .first()
         )
         if existing_project:
+            if getattr(existing_project, "locked", False):
+                logger.info("Ignorando %s (bloqueado para atualização manual).", repo_name)
+                skipped_count += 1
+                continue
             skipped_count += 1
             continue
 

@@ -6,6 +6,7 @@ from .abtests import abtest_bp
 from .feedback import feedback_bp
 from .compliance import compliance_bp
 from .agenda import agenda_bp
+from .admin_projects import bp as admin_projects_bp
 
 __all__ = [
     "webhook_bp",
@@ -16,4 +17,5 @@ __all__ = [
     "feedback_bp",
     "compliance_bp",
     "agenda_bp",
+    "admin_projects_bp",
 ]
