@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
+import re
 import time
-from typing import Any
+from typing import Any, Iterable
 
 import requests
 import structlog
@@ -196,3 +197,71 @@ class LLMClient:
                 duration=duration,
                 company=self.company_label,
             )
+
+
+_SUMMARY_MAX_WORDS = 40
+_SUMMARY_MAX_CHARS = 360
+
+
+def _iter_summary_lines(readme_content: str) -> Iterable[str]:
+    for line in readme_content.splitlines():
+        line = line.strip()
+        if line:
+            yield line
+
+
+def _local_summary(prompt: str) -> str:
+    if not prompt:
+        return "Projeto de software"
+
+    sections = prompt.split("---")
+    readme_content = sections[1] if len(sections) >= 3 else prompt
+    readme_content = readme_content.strip()
+
+    if not readme_content:
+        return "Projeto de software"
+
+    summary_lines: list[str] = []
+    word_count = 0
+    for line in _iter_summary_lines(readme_content):
+        tokens = line.split()
+        summary_lines.append(line)
+        word_count += len(tokens)
+        if word_count >= _SUMMARY_MAX_WORDS:
+            break
+
+    summary = " ".join(summary_lines)
+    summary = re.sub(r"\s+", " ", summary).strip()
+    if len(summary) > _SUMMARY_MAX_CHARS:
+        summary = summary[: (_SUMMARY_MAX_CHARS - 3)].rsplit(" ", 1)[0] + "..."
+    return summary or "Projeto de software"
+
+
+def generate_text(prompt: str, *, tenant: TenantContext | None = None) -> str:
+    """Gera texto usando o cliente LLM com fallback local.
+
+    Quando a chave de API do Gemini não estiver configurada ou ocorrer algum
+    erro na chamada real, devolvemos um resumo heurístico para manter o
+    comportamento determinístico nos ambientes de teste.
+    """
+
+    sanitized_prompt = (prompt or "").strip()
+    if not sanitized_prompt:
+        return "Projeto de software"
+
+    if not settings.gemini_api_key:
+        return _local_summary(sanitized_prompt)
+
+    tenant_context = tenant or TenantContext(company_id=0, label="system")
+    redis_client = Redis.from_url(settings.redis_url, decode_responses=True)
+    client = LLMClient(redis_client, tenant_context)
+
+    try:
+        response = client.generate_reply(sanitized_prompt, [])
+        return response.strip() or "Projeto de software"
+    except Exception as exc:  # pragma: no cover - graceful degradation path
+        structlog.get_logger().bind(service="gemini").warning(
+            "llm_generate_text_fallback",
+            error=sanitize_for_log(str(exc)),
+        )
+        return _local_summary(sanitized_prompt)
