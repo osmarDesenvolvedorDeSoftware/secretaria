@@ -43,7 +43,6 @@ from app.services.security import detect_prompt_injection, sanitize_for_log, san
 from app.services.tenancy import TenantContext, queue_name_for_company
 from app.services.whaticket import WhaticketClient, WhaticketError
 from app.models import Appointment, Company
-from app.services.chatbot_profile import build_profile_response
 
 
 APPOINTMENT_CONFIRMATION_WORDS = {
@@ -713,15 +712,28 @@ def process_incoming_message(
                 template_vars["resposta"] = final_message
                 llm_status = "agenda_override"
             else:
-                profile_auto_reply = build_profile_response(
-                    user_message,
-                    session_factory,
-                    service.company_id,
-                )
-                if profile_auto_reply:
-                    final_message = profile_auto_reply.strip()
-                    template_vars["resposta"] = final_message
-                    llm_status = "profile_auto_reply"
+                # Tenta construir contexto RAG para perfil/projetos
+                from app.services.chatbot_profile import build_rag_context
+
+                rag_context = build_rag_context(user_message, session_factory, service.company_id)
+
+                if rag_context:
+                    # Intenção de perfil/projeto detectada, usa RAG
+                    llm_context = service.context_engine.build_llm_context(runtime_context)
+
+                    try:
+                        response_text = service.llm.generate_reply(
+                            text=user_message,
+                            context=llm_context,
+                            system_prompt=rag_context["system_prompt"]
+                        )
+                        final_message = response_text.strip()
+                        template_vars["resposta"] = final_message
+                        llm_status = rag_context["status"]
+                    except Exception as exc:
+                        logger.exception("rag_llm_error", error=str(exc))
+                        final_message = "Desculpe, tive um problema ao buscar essas informações. Pode tentar novamente?"
+                        llm_status = "rag_error"
             if not final_message and detect_prompt_injection(sanitized):
                 logger.warning("prompt_injection_detected")
                 llm_prompt_injection_blocked_total.labels(
