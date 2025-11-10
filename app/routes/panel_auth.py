@@ -22,6 +22,11 @@ def extract_panel_token() -> str | None:
 def require_panel_auth(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
+        if settings.internal_sync_mode and request.headers.get("X-Internal-Request") == "github_sync":
+            request.panel_identity = {"scope": "internal", "company_id": settings.default_company_id}  # type: ignore[attr-defined]
+            request.panel_scope = "internal"  # type: ignore[attr-defined]
+            request.panel_company_id = settings.default_company_id  # type: ignore[attr-defined]
+            return func(*args, **kwargs)
         token = extract_panel_token()
         payload = verify_jwt(token, settings.panel_jwt_secret)
         if payload is None:
