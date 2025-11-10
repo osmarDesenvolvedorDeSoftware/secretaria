@@ -58,11 +58,28 @@ def sync_github_projects_to_db(db: Session, company_id: int) -> Dict[str, object
     auto_sync_logger.info("Iniciando sincronização do GitHub para company_id=%s", company_id)
 
     repos = github_service.fetch_github_projects()
+    if repos is None:
+        duration = time.monotonic() - start_time
+        logger.error(
+            "Falha ao obter projetos do GitHub. Verifique o token GITHUB_PAT, permissões ou o nome de usuário configurado."
+        )
+        auto_sync_logger.error(
+            "Falha ao obter projetos para company_id=%s (%.2fs)", company_id, duration
+        )
+        return {
+            "status": "error",
+            "message": "Falha ao obter projetos do GitHub. Verifique token ou usuário.",
+        }
     if not repos:
         duration = time.monotonic() - start_time
-        logger.warning("Nenhum projeto encontrado ou erro na API do GitHub.")
-        auto_sync_logger.error("Sem projetos para company_id=%s (%.2fs)", company_id, duration)
-        return {"status": "error", "message": "Nenhum projeto encontrado ou erro na API."}
+        logger.warning("Nenhum repositório retornado pelo GitHub para sincronizar.")
+        auto_sync_logger.warning(
+            "Nenhum repositório encontrado para company_id=%s (%.2fs)", company_id, duration
+        )
+        return {
+            "status": "error",
+            "message": "Nenhum repositório disponível para sincronização.",
+        }
 
     new_projects_count = 0
     skipped_count = 0
