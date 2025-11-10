@@ -42,24 +42,54 @@ def _normalize_candidate(value: Any) -> str | None:
 
 def extract_number(payload: dict[str, Any]) -> str:
     """Extract and normalize the WhatsApp number from the payload."""
-    key_payload = payload.get("key", {}) if isinstance(payload.get("key"), dict) else {}
 
-    candidates = [
-        key_payload.get("remoteJidAlt"),
-        key_payload.get("remoteJid"),
-        payload.get("remoteJidAlt"),
-        payload.get("remoteJid"),
-        payload.get("from"),
-        payload.get("number"),
-        payload.get("contact", {}).get("number"),
-        payload.get("contact", {}).get("phone"),
-        payload.get("ticket", {}).get("contact", {}).get("number"),
-        payload.get("ticket", {}).get("contact", {}).get("phone"),
-    ]
+    def _key_payload(value: Any) -> dict[str, Any]:
+        return value if isinstance(value, dict) else {}
 
-    for candidate in candidates:
+    key_payload = _key_payload(payload.get("key"))
+
+    candidate_sources: list[tuple[str, Any]] = []
+
+    key_remote = key_payload.get("remoteJid")
+    key_alt = key_payload.get("remoteJidAlt")
+    if key_remote and "@s.whatsapp.net" in str(key_remote):
+        candidate_sources.append(("key.remoteJid", key_remote))
+    elif not key_remote and key_alt:
+        candidate_sources.append(("key.remoteJidAlt", key_alt))
+
+    payload_remote = payload.get("remoteJid")
+    payload_alt = payload.get("remoteJidAlt")
+    if payload_remote and "@s.whatsapp.net" in str(payload_remote):
+        candidate_sources.append(("remoteJid", payload_remote))
+    elif not payload_remote and payload_alt:
+        candidate_sources.append(("remoteJidAlt", payload_alt))
+
+    candidate_sources.extend(
+        [
+            ("from", payload.get("from")),
+            ("number", payload.get("number")),
+            ("contact.number", payload.get("contact", {}).get("number")),
+            ("contact.phone", payload.get("contact", {}).get("phone")),
+            (
+                "ticket.contact.number",
+                payload.get("ticket", {}).get("contact", {}).get("number"),
+            ),
+            (
+                "ticket.contact.phone",
+                payload.get("ticket", {}).get("contact", {}).get("phone"),
+            ),
+        ]
+    )
+
+    for source, candidate in candidate_sources:
+        if not candidate:
+            continue
+        logger.debug("extract_number selected candidate %s: %s", source, candidate)
         normalized = _normalize_candidate(candidate)
         if normalized:
+            logger.debug(
+                "extract_number normalized candidate %s to: %s", source, normalized
+            )
             return normalized
 
     raise ValueError("could not extract whatsapp number")
