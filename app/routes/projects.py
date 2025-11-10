@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from app import get_db_session
 from app.config import settings
 from app.models import Company, PersonalizationConfig, Plan, Project, Subscription
+from app.services import project_sync_service
 from app.services.auth import encode_jwt
 from app.services.billing import BillingService
 from app.services.provisioner import ProvisionerService, ProvisioningPayload
@@ -23,6 +24,7 @@ def _project_to_dict(project: Project) -> dict[str, object]:
         "client": project.client,
         "description": project.description,
         "status": project.status,
+        "github_url": project.github_url,
         "created_at": project.created_at.isoformat() if project.created_at else None,
     }
 
@@ -361,6 +363,7 @@ def create_project():
         client=payload.get("client"),
         description=payload.get("description"),
         status=payload.get("status") or "ativo",
+        github_url=payload.get("github_url"),
     )
 
     if not project.name:
@@ -389,7 +392,7 @@ def update_project(project_id: int):
         if project.company_id != company_id:
             return jsonify({"error": "forbidden"}), 403
 
-        for field in ("name", "client", "description", "status"):
+        for field in ("name", "client", "description", "status", "github_url"):
             if field in payload:
                 setattr(project, field, payload[field])
         session.add(project)
@@ -397,6 +400,21 @@ def update_project(project_id: int):
         project_id = project.id
 
     return jsonify({"ok": True, "id": project_id})
+
+
+@bp.post("/projects/sync")
+@require_panel_auth
+def sync_github_projects():
+    try:
+        company_id = _require_company_id()
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    with get_db_session(current_app) as session:
+        result = project_sync_service.sync_github_projects_to_db(session, company_id)
+
+    status_code = 200 if result.get("status") == "success" else 500
+    return jsonify(result), status_code
 
 
 @bp.delete("/projects/<int:project_id>")
