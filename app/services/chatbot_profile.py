@@ -10,6 +10,10 @@ from app.models.project import Project
 PROFILE_QUESTION_KEYWORDS = (
     "quem é o desenvolvedor",
     "quem e o desenvolvedor",
+    "me fala do desenvolvedor",
+    "me fale do desenvolvedor",
+    "fale do desenvolvedor",
+    "fale sobre o desenvolvedor",
     "quem fez",
     "quem criou",
     "quem programou",
@@ -20,9 +24,6 @@ PROFILE_QUESTION_KEYWORDS = (
     "voce e uma empresa",
     "o que você faz",
     "o que voce faz",
-    "quais projetos",
-    "quais projetos você",
-    "quais projetos voce",
     "quais tecnologias",
     "qual sua formação",
     "qual sua formacao",
@@ -40,10 +41,59 @@ PROJECT_LIST_KEYWORDS = (
     "quais projetos você possui",
     "projetos",
     "meus projetos",
+    "me fala dos projetos",
+    "me fale dos projetos",
+    "me fala do projeto",
+    "me fale do projeto",
     "portfólio",
     "portfolio",
     "trabalhos",
 )
+
+PROFILE_KEY_TERMS = {
+    "desenvolvedor",
+    "desenvolvedora",
+    "programador",
+    "programadora",
+    "dev",
+}
+
+PROFILE_INTENT_HINTS = {
+    "quem",
+    "qual",
+    "fala",
+    "fale",
+    "sobre",
+    "me",
+    "conta",
+    "conte",
+    "informações",
+    "informacoes",
+    "info",
+}
+
+PROJECT_KEY_TERMS = {
+    "projeto",
+    "projetos",
+    "portfolio",
+    "portfólio",
+    "trabalho",
+    "trabalhos",
+}
+
+PROJECT_INTENT_HINTS = {
+    "quais",
+    "lista",
+    "list",
+    "mostra",
+    "mostrar",
+    "fale",
+    "fala",
+    "sobre",
+    "me",
+    "conte",
+    "conta",
+}
 
 DEFAULT_FALLBACK_MESSAGE = (
     "Posso te ajudar com informações sobre os projetos desenvolvidos ou o perfil do "
@@ -57,13 +107,27 @@ def _normalize_message(message: str) -> str:
 
 
 def _matches_profile_question(message: str) -> bool:
-    normalized = message.lower()
-    return any(keyword in normalized for keyword in PROFILE_QUESTION_KEYWORDS)
+    normalized = _normalize_message(message)
+    if any(keyword in normalized for keyword in PROFILE_QUESTION_KEYWORDS):
+        return True
+
+    tokens = set(normalized.split())
+    if PROFILE_KEY_TERMS.intersection(tokens) and PROFILE_INTENT_HINTS.intersection(tokens):
+        return True
+
+    return False
 
 
 def _matches_project_query(message: str) -> bool:
-    normalized = message.lower()
-    return any(keyword in normalized for keyword in PROJECT_LIST_KEYWORDS)
+    normalized = _normalize_message(message)
+    if any(keyword in normalized for keyword in PROJECT_LIST_KEYWORDS):
+        return True
+
+    tokens = set(normalized.split())
+    if PROJECT_KEY_TERMS.intersection(tokens) and PROJECT_INTENT_HINTS.intersection(tokens):
+        return True
+
+    return False
 
 
 def _select_projects(
