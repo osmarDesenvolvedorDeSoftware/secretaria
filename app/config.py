@@ -45,6 +45,7 @@ class Config:
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
     github_pat: str = os.getenv("GITHUB_PAT", "")
     github_username: str = os.getenv("GITHUB_USERNAME", "")
+    github_include_private: bool = _bool("GITHUB_INCLUDE_PRIVATE", True)
     embedding_provider: str = os.getenv("EMBEDDING_PROVIDER", "gemini")
     redis_url: str = os.getenv("REDIS_URL", "redis://redis:6379/0")
     database_url: str = os.getenv("DATABASE_URL", "postgresql+psycopg2://postgres:postgres@postgres:5432/postgres")

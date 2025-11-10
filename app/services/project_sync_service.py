@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 import time
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict
 from sqlalchemy.orm import Session
 
 from app.services.llm import generate_text
@@ -70,15 +70,23 @@ def sync_github_projects_to_db(db: Session, company_id: int) -> Dict[str, object
             "status": "error",
             "message": "Falha ao obter projetos do GitHub. Verifique token ou usuário.",
         }
+    total_repos = len(repos)
+    logger.info("GitHub retornou %s repositório(s) para sincronização.", total_repos)
+    auto_sync_logger.info(
+        "GitHub retornou %s repositório(s) para company_id=%s", total_repos, company_id
+    )
+
     if not repos:
         duration = time.monotonic() - start_time
-        logger.warning("Nenhum repositório retornado pelo GitHub para sincronizar.")
-        auto_sync_logger.warning(
-            "Nenhum repositório encontrado para company_id=%s (%.2fs)", company_id, duration
+        summary = "Sincronização concluída. 0 repositórios encontrados (públicos + privados)."
+        logger.info(summary)
+        auto_sync_logger.info(
+            "%s (company_id=%s, %.2fs)", summary, company_id, duration
         )
         return {
-            "status": "error",
-            "message": "Nenhum repositório disponível para sincronização.",
+            "status": "success",
+            "summary": summary,
+            "new_projects": 0,
         }
 
     new_projects_count = 0
@@ -129,13 +137,17 @@ def sync_github_projects_to_db(db: Session, company_id: int) -> Dict[str, object
 
     duration = time.monotonic() - start_time
     summary = (
-        f"Sincronização concluída. {new_projects_count} novos projetos adicionados. "
-        f"{skipped_count} projetos já existentes."
+        f"Sincronização concluída. {total_repos} repositórios encontrados (públicos + privados). "
+        f"{new_projects_count} novos projetos adicionados e {skipped_count} já existiam."
     )
     logger.info(summary)
     auto_sync_logger.info(
-        "Sincronização finalizada para company_id=%s em %.2fs (novos=%s, ignorados=%s)",
-        company_id, duration, new_projects_count, skipped_count,
+        "Sincronização finalizada para company_id=%s em %.2fs (total=%s, novos=%s, ignorados=%s)",
+        company_id,
+        duration,
+        total_repos,
+        new_projects_count,
+        skipped_count,
     )
 
     return {"status": "success", "summary": summary, "new_projects": new_projects_count}

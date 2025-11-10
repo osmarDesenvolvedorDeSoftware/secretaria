@@ -24,8 +24,43 @@ def _build_headers(include_token: bool = True) -> dict[str, str]:
     if include_token:
         token = settings.github_pat.strip()
         if token:
-            headers["Authorization"] = f"token {token}"
+            headers["Authorization"] = f"Bearer {token}"
     return headers
+
+
+def _fetch_paginated_repos(
+    client: httpx.Client,
+    url_builder,
+    log_prefix: str,
+) -> List[Dict[str, Any]]:
+    """Fetch paginated repositories until exhaustion."""
+
+    collected: List[Dict[str, Any]] = []
+    page = 1
+
+    while True:
+        logger.info("%s (página %s)...", log_prefix, page)
+        response = client.get(url_builder(page))
+
+        if response.status_code == 403:
+            logger.warning(
+                "Limite de requisições da API do GitHub atingido (status 403). Aguarde antes de tentar novamente."
+            )
+            raise httpx.HTTPStatusError("rate limited", request=response.request, response=response)
+
+        response.raise_for_status()
+
+        data = response.json()
+        if not isinstance(data, list):
+            logger.error("Resposta inesperada da API do GitHub ao listar repositórios: %s", data)
+            break
+
+        collected.extend(data)
+        if len(data) < 100:
+            break
+        page += 1
+
+    return collected
 
 
 def fetch_github_projects() -> Optional[List[Dict[str, Any]]]:
@@ -33,52 +68,63 @@ def fetch_github_projects() -> Optional[List[Dict[str, Any]]]:
 
     token = settings.github_pat.strip()
     github_username = settings.github_username.strip()
+    include_private = settings.github_include_private
 
     repos: Optional[List[Dict[str, Any]]] = None
-    should_try_public = False
+    should_try_public = not include_private
 
-    if token:
-        url = f"{BASE_URL}/user/repos?sort=updated&type=owner"
+    if include_private and not token:
+        logger.warning(
+            "GITHUB_INCLUDE_PRIVATE está habilitado, mas nenhum token foi configurado. Fallback para repositórios públicos."
+        )
+        should_try_public = True
+
+    if include_private and token:
         headers = _build_headers(include_token=True)
         try:
             with httpx.Client(headers=headers, timeout=10.0) as client:
-                response = client.get(url)
-                response.raise_for_status()
-                repos = response.json()
+                repos = _fetch_paginated_repos(
+                    client,
+                    lambda page: (
+                        f"{BASE_URL}/user/repos?sort=updated&type=owner&per_page=100&page={page}"
+                    ),
+                    "Buscando repositórios",
+                )
         except httpx.HTTPStatusError as exc:
-            status_code = exc.response.status_code
-            if status_code in {401, 403}:
-                logger.error(
-                    "Token do GitHub inválido ou sem permissões para /user/repos (status %s).",
-                    status_code,
+            status_code = exc.response.status_code if exc.response else None
+            if status_code == 401:
+                logger.error("Token inválido ou sem permissão para repositórios privados.")
+                should_try_public = True
+            elif status_code == 403:
+                return None
+            elif status_code == 404:
+                logger.warning(
+                    "Endpoint de repositórios privados não disponível. Tentando listar repositórios públicos."
                 )
                 should_try_public = True
             else:
-                logger.error("Erro HTTP ao buscar projetos do GitHub com token: %s", exc)
-                return None
+                logger.error(
+                    "Erro HTTP ao buscar repositórios privados do GitHub: status %s", status_code
+                )
+                should_try_public = True
         except httpx.RequestError as exc:
-            logger.error("Erro de rede ao buscar projetos do GitHub com token: %s", exc)
+            logger.error("Erro de rede ao buscar repositórios privados do GitHub: %s", exc)
             should_try_public = True
-    else:
-        should_try_public = True
 
-    if (repos is None or should_try_public) and should_try_public:
-        if not github_username:
-            logger.error(
-                "Não é possível buscar repositórios públicos: GITHUB_USERNAME não configurado."
-            )
-            return None
-
-        url = f"{BASE_URL}/users/{github_username}/repos?sort=updated&type=owner"
+    if (repos is None or should_try_public) and github_username:
         headers = _build_headers(include_token=False)
         try:
             with httpx.Client(headers=headers, timeout=10.0) as client:
-                response = client.get(url)
-                response.raise_for_status()
-                repos = response.json()
-            if token:
+                repos = _fetch_paginated_repos(
+                    client,
+                    lambda page: (
+                        f"{BASE_URL}/users/{github_username}/repos?sort=updated&type=owner&per_page=100&page={page}"
+                    ),
+                    "Buscando repositórios públicos",
+                )
+            if include_private and token:
                 logger.warning(
-                    "Utilizando repositórios públicos do usuário %s devido a problemas com o token.",
+                    "Token configurado, mas utilizando apenas repositórios públicos do usuário %s.",
                     github_username,
                 )
         except httpx.HTTPStatusError as exc:
@@ -95,6 +141,11 @@ def fetch_github_projects() -> Optional[List[Dict[str, Any]]]:
                 exc,
             )
             return None
+    elif repos is None and not github_username:
+        logger.error(
+            "Não é possível buscar repositórios públicos: GITHUB_USERNAME não configurado."
+        )
+        return None
 
     if repos is None:
         return None
@@ -105,6 +156,7 @@ def fetch_github_projects() -> Optional[List[Dict[str, Any]]]:
             "name": repo.get("name"),
             "description": repo.get("description"),
             "url": repo.get("html_url"),
+            "private": repo.get("private"),
             "language": repo.get("language"),
             "owner_login": repo.get("owner", {}).get("login"),
         }
