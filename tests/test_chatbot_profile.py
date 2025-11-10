@@ -43,10 +43,17 @@ def test_dynamic_profile_responses(db_session):
     db_session.commit()
 
     msg1 = "quem é o desenvolvedor?"
-    print(generate_dynamic_response(db_session, msg1))
+    response1 = generate_dynamic_response(db_session, msg1)
+    assert "O desenvolvedor é" in response1
+
+    msg1b = "me fala do desenvolvedor"
+    response1b = generate_dynamic_response(db_session, msg1b)
+    assert "O desenvolvedor é" in response1b
 
     msg2 = "me fala do projeto IPTV"
-    print(generate_dynamic_response(db_session, msg2))
+    response2 = generate_dynamic_response(db_session, msg2)
+    assert "projeto **IPTV**" in response2
 
     msg3 = "quais projetos você tem?"
-    print(generate_dynamic_response(db_session, msg3))
+    response3 = generate_dynamic_response(db_session, msg3)
+    assert "trabalhou nos seguintes projetos" in response3
