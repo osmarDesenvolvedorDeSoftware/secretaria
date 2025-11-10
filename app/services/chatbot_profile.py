@@ -1,13 +1,19 @@
 from __future__ import annotations
 
-from typing import Iterable
+from typing import Sequence
 
-from sqlalchemy import desc
+from sqlalchemy.orm import Session
 
 from app.models.profile import Profile
 from app.models.project import Project
 
 PROFILE_QUESTION_KEYWORDS = (
+    "quem é o desenvolvedor",
+    "quem e o desenvolvedor",
+    "quem fez",
+    "quem criou",
+    "quem programou",
+    "quem desenvolveu",
     "quem é você",
     "quem é voce",
     "você é uma empresa",
@@ -24,10 +30,57 @@ PROFILE_QUESTION_KEYWORDS = (
     "o que voce esta estudando",
 )
 
+PROJECT_LIST_KEYWORDS = (
+    "quais projetos",
+    "quais projetos voce",
+    "quais projetos você",
+    "quais projetos voce tem",
+    "quais projetos você tem",
+    "quais projetos voce possui",
+    "quais projetos você possui",
+    "projetos",
+    "meus projetos",
+    "portfólio",
+    "portfolio",
+    "trabalhos",
+)
+
+DEFAULT_FALLBACK_MESSAGE = (
+    "Posso te ajudar com informações sobre os projetos desenvolvidos ou o perfil do "
+    "programador. Você pode perguntar, por exemplo: 'quem é o desenvolvedor' ou 'me "
+    "fale do projeto IPTV'."
+)
+
+
+def _normalize_message(message: str) -> str:
+    return " ".join(message.lower().strip().split())
+
 
 def _matches_profile_question(message: str) -> bool:
     normalized = message.lower()
     return any(keyword in normalized for keyword in PROFILE_QUESTION_KEYWORDS)
+
+
+def _matches_project_query(message: str) -> bool:
+    normalized = message.lower()
+    return any(keyword in normalized for keyword in PROJECT_LIST_KEYWORDS)
+
+
+def _select_projects(
+    session: Session,
+    company_id: int | None,
+    project_limit: int | None = None,
+) -> list[Project]:
+    query = session.query(Project)
+    if company_id is not None:
+        query = query.filter(Project.company_id == company_id)
+    if hasattr(Project, "created_at"):
+        query = query.order_by(Project.created_at.desc(), Project.id.desc())
+    else:
+        query = query.order_by(Project.id.desc())
+    if project_limit is not None:
+        query = query.limit(project_limit)
+    return list(query.all())
 
 
 def build_profile_response(
@@ -38,72 +91,128 @@ def build_profile_response(
 ) -> str | None:
     if not message.strip():
         return None
-    if not _matches_profile_question(message):
-        return None
+    normalized = message.lower()
 
     session = session_factory()
     try:
         profile = (
             session.query(Profile)
-            .order_by(desc(Profile.updated_at), desc(Profile.id))
+            .order_by(Profile.updated_at.desc(), Profile.id.desc())
             .first()
         )
-        projects: Iterable[Project] = []
-        if hasattr(session, "query"):
-            projects = (
-                session.query(Project)
-                .filter(Project.company_id == company_id)
-                .order_by(desc(Project.id))
-                .limit(project_limit)
-                .all()
-            )
+        all_projects: list[Project] = _select_projects(
+            session, company_id, project_limit=None
+        )
+        should_answer = _matches_profile_question(message) or _matches_project_query(message)
+        if not should_answer:
+            for project in all_projects:
+                name = (project.name or "").lower()
+                if name and name in normalized:
+                    should_answer = True
+                    break
+        if not should_answer:
+            return None
+
+        return generate_dynamic_response(
+            session,
+            message,
+            company_id=company_id,
+            project_limit=project_limit,
+            profile=profile,
+            projects=all_projects,
+        )
     finally:
         session.close()
 
+
+def generate_dynamic_response(
+    db_session: Session,
+    text: str,
+    *,
+    company_id: int | None = None,
+    project_limit: int | None = 5,
+    profile: Profile | None = None,
+    projects: Sequence[Project] | None = None,
+) -> str:
+    normalized = _normalize_message(text)
+
     if profile is None:
+        profile = (
+            db_session.query(Profile)
+            .order_by(Profile.updated_at.desc(), Profile.id.desc())
+            .first()
+        )
+
+    project_list: list[Project]
+    if projects is None:
+        project_list = _select_projects(
+            db_session,
+            company_id,
+            project_limit=None,
+        )
+    else:
+        project_list = list(projects)
+
+    if any(keyword in normalized for keyword in PROFILE_QUESTION_KEYWORDS):
+        if profile:
+            return (
+                f"O desenvolvedor é **{profile.full_name}**, {profile.role or 'desenvolvedor freelancer'} "
+                f"especializado em {profile.specialization or 'soluções digitais sob medida'}.\n\n"
+                f"Formação: {profile.education or 'formação em desenvolvimento de software e computação em nuvem'}\n"
+                f"Atualmente estudando: {profile.current_studies or 'Android, Python, IoT e Inteligência Artificial'}\n"
+                f"Disponibilidade: {profile.availability or 'Disponível para novos projetos'}\n"
+                f"Portfólio: {profile.website or 'https://osmardev.online'}"
+            ).strip()
         return (
             "Sou um desenvolvedor freelancer especializado em Android, Python e automações "
             "inteligentes. Posso te ajudar a tirar o projeto do papel e integrar sistemas."
         )
 
-    project_lines = []
-    for project in projects:
-        snippet = (project.description or "").strip()
-        if snippet and len(snippet) > 160:
-            snippet = f"{snippet[:160].rstrip()}..."
-        elif not snippet:
-            snippet = "Projeto em andamento, descrição em breve."
-        project_lines.append(f"- {project.name}: {snippet}")
+    for project in project_list:
+        project_name = (project.name or "").lower()
+        if project_name and project_name in normalized:
+            created_at = None
+            if hasattr(project, "created_at") and project.created_at is not None:
+                created_at = project.created_at.strftime("%d/%m/%Y")
+            description = (project.description or "Sem descrição disponível.").strip()
+            status = (project.status or "Concluído").strip()
+            repo = project.github_url or "privado ou ainda não publicado."
+            author = profile.full_name if profile else "nosso desenvolvedor principal"
+            parts = [
+                f"O projeto **{project.name}** foi desenvolvido por {author}.",
+                f"\nDescrição: {description}",
+                f"\nStatus: {status}",
+            ]
+            if created_at:
+                parts.append(f"\nData de criação: {created_at}")
+            parts.append(f"\nRepositório: {repo}")
+            return "".join(parts).strip()
 
-    if not project_lines:
-        project_lines.append("- Em breve adicionarei novos projetos públicos ao portfólio.")
+    if any(keyword in normalized for keyword in PROJECT_LIST_KEYWORDS):
+        if not project_list:
+            return "Ainda não há projetos cadastrados no sistema."
 
-    parts = [
-        f"Eu sou {profile.full_name}, {profile.role or 'desenvolvedor freelancer'} especializado em {profile.specialization or 'soluções digitais sob medida.'}",
-    ]
-    if profile.bio:
-        parts.append(profile.bio.strip())
+        limit = None
+        if normalized not in {"projetos", "meus projetos"}:
+            limit = project_limit
 
-    if profile.education:
-        parts.append(f"\nFormação:\n{profile.education.strip()}")
+        displayed_projects = project_list if limit is None else project_list[: max(limit or 0, 0)]
+        lines = []
+        for project in displayed_projects:
+            snippet = (project.description or "Sem descrição disponível.").strip()
+            if len(snippet) > 120:
+                snippet = f"{snippet[:120].rstrip()}..."
+            lines.append(f"- **{project.name}** — {snippet}")
 
-    if profile.current_studies:
-        parts.append(f"\nAtualmente estudando:\n{profile.current_studies.strip()}")
+        response = [
+            f"Atualmente, {profile.full_name if profile else 'o desenvolvedor'} trabalhou nos seguintes projetos:",
+            "\n".join(lines),
+        ]
 
-    parts.append("\nAlguns dos meus projetos recentes:")
-    parts.append("\n".join(project_lines))
+        if limit is not None and project_limit is not None and len(project_list) > project_limit:
+            response.append(
+                "\n\nDiga o nome de um deles para saber mais detalhes."
+            )
+        return "\n".join(part for part in response if part).strip()
 
-    extras = []
-    if profile.languages:
-        extras.append(f"Idiomas: {profile.languages.strip()}.")
-    if profile.certifications:
-        extras.append(f"Certificações: {profile.certifications.strip()}.")
-    if profile.availability:
-        extras.append(profile.availability.strip())
-    if extras:
-        parts.append("\n" + " ".join(extras))
-
-    if profile.website:
-        parts.append(f"\nSaiba mais em {profile.website.strip()}.")
-
-    return "\n".join(part for part in parts if part)
+    return DEFAULT_FALLBACK_MESSAGE
