@@ -82,6 +82,7 @@ class Config:
     retention_days_contexts: int = _int("RETENTION_DAYS_CONTEXTS", 90)
     retention_days_feedback: int = _int("RETENTION_DAYS_FEEDBACK", 90)
     retention_days_ab_events: int = _int("RETENTION_DAYS_AB_EVENTS", 120)
+    # Para Cal.com self-hosted, configure: CAL_API_BASE_URL=https://cal.seudominio.com/api/v1
     cal_api_base_url: str = os.getenv("CAL_API_BASE_URL", "https://api.cal.com/v1")
     cal_default_days_ahead: int = _int("CAL_DEFAULT_DAYS_AHEAD", 7)
     context_ttl: int = field(init=False)

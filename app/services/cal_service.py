@@ -62,7 +62,6 @@ def _ensure_credentials(company: Company) -> None:
 
 def _headers(company: Company, extra: Optional[dict[str, str]] = None) -> dict[str, str]:
     headers = {
-        "Authorization": f"Bearer {company.cal_api_key}",
         "Accept": "application/json",
     }
     if extra:
@@ -82,7 +81,20 @@ def _full_url(path: str) -> str:
     reraise=True,
     before_sleep=before_sleep_log(LOGGER, "warning"),
 )
-def _perform_request(method: str, url: str, *, headers: dict[str, str], **kwargs: Any) -> requests.Response:
+def _perform_request(
+    method: str,
+    url: str,
+    *,
+    headers: dict[str, str],
+    api_key: str | None = None,
+    **kwargs: Any,
+) -> requests.Response:
+    if api_key:
+        params = kwargs.pop("params", None) or {}
+        if not isinstance(params, dict):
+            params = dict(params)
+        params.setdefault("apiKey", api_key)
+        kwargs["params"] = params
     response = requests.request(
         method,
         url,
@@ -124,7 +136,24 @@ def listar_disponibilidade(
         _ensure_credentials(company)
         params = {"userId": usuario_id, "start": data_inicial, "end": data_final}
         url = _full_url("availability")
-        response = _perform_request("GET", url, headers=_headers(company), params=params)
+        LOGGER.debug(
+            "cal_availability_request",
+            user_id=usuario_id,
+            start=data_inicial,
+            end=data_final,
+            url=url,
+        )
+        response = _perform_request(
+            "GET",
+            url,
+            headers=_headers(company),
+            api_key=company.cal_api_key,
+            params=params,
+        )
+        if response.status_code == 401:
+            raise CalServiceConfigError("cal_api_key_invalid")
+        if response.status_code == 404:
+            raise CalServiceError("cal_resource_not_found")
         if response.status_code >= 400:
             raise CalServiceError(f"availability_error:{response.status_code}")
         payload = response.json() if response.content else {}
@@ -173,14 +202,20 @@ def criar_agendamento(
         appointments_total.labels(company=str(company.id)).inc()
         url = _full_url("bookings")
         started = time.monotonic()
+        LOGGER.debug("cal_booking_request", payload=payload, url=url)
         response = _perform_request(
             "POST",
             url,
             headers=_headers(company, {"Content-Type": "application/json"}),
+            api_key=company.cal_api_key,
             json=payload,
         )
         latency = time.monotonic() - started
         appointments_latency_seconds.labels(company=str(company.id)).observe(latency)
+        if response.status_code == 401:
+            raise CalServiceConfigError("cal_api_key_invalid")
+        if response.status_code == 404:
+            raise CalServiceError("cal_resource_not_found")
         if response.status_code >= 400:
             raise CalServiceError(f"booking_error:{response.status_code}")
 
@@ -268,7 +303,16 @@ def cancelar_agendamento(company_id: int, booking_id: str) -> bool:
         _ensure_credentials(company)
 
         url = _full_url(f"bookings/{booking_id}")
-        response = _perform_request("DELETE", url, headers=_headers(company))
+        response = _perform_request(
+            "DELETE",
+            url,
+            headers=_headers(company),
+            api_key=company.cal_api_key,
+        )
+        if response.status_code == 401:
+            raise CalServiceConfigError("cal_api_key_invalid")
+        if response.status_code == 404:
+            raise CalServiceError("cal_resource_not_found")
         if response.status_code >= 400:
             raise CalServiceError(f"booking_cancel_error:{response.status_code}")
 

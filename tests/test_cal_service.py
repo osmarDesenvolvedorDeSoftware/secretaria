@@ -31,10 +31,11 @@ def _prepare_company(app) -> Company:
 def test_listar_disponibilidade_success(app, monkeypatch) -> None:
     _prepare_company(app)
 
-    def fake_request(method: str, url: str, *, headers, params=None, **_: object) -> DummyResponse:
+    def fake_request(method: str, url: str, *, headers, params=None, api_key=None, **_: object) -> DummyResponse:
         assert method == "GET"
         assert "availability" in url
-        assert headers["Authorization"] == "Bearer test-key"
+        assert headers["Accept"] == "application/json"
+        assert api_key == "test-key"
         assert params["userId"] == "host"
         return DummyResponse(200, {"slots": [{"start": "2024-04-01T14:00:00Z"}]})
 
@@ -52,10 +53,11 @@ def test_listar_disponibilidade_success(app, monkeypatch) -> None:
 def test_criar_agendamento_persists_appointment(app, monkeypatch) -> None:
     _prepare_company(app)
 
-    def fake_request(method: str, url: str, *, headers, json=None, **_: object) -> DummyResponse:
+    def fake_request(method: str, url: str, *, headers, json=None, api_key=None, **_: object) -> DummyResponse:
         assert method == "POST"
         assert "bookings" in url
-        assert headers["Authorization"] == "Bearer test-key"
+        assert headers["Accept"] == "application/json"
+        assert api_key == "test-key"
         assert json is not None
         return DummyResponse(
             200,
@@ -90,9 +92,10 @@ def test_criar_agendamento_persists_appointment(app, monkeypatch) -> None:
 def test_cancelar_agendamento_updates_status(app, monkeypatch) -> None:
     company = _prepare_company(app)
 
-    def fake_request(method: str, url: str, *, headers, **_: object) -> DummyResponse:
+    def fake_request(method: str, url: str, *, headers, api_key=None, **_: object) -> DummyResponse:
         assert method == "DELETE"
-        assert headers["Authorization"] == "Bearer test-key"
+        assert headers["Accept"] == "application/json"
+        assert api_key == "test-key"
         return DummyResponse(200, {})
 
     monkeypatch.setattr(cal_service, "_perform_request", fake_request)
