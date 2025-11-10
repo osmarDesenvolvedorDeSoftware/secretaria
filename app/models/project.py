@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, Boolean, func
 from sqlalchemy.orm import relationship
 
 from app.models.base import Base
@@ -16,6 +16,7 @@ class Project(Base):
     description = Column(Text)
     status = Column(String(50), default="ativo")
     github_url = Column(String(255))
+    locked = Column(Boolean, default=False, nullable=False, comment="locked=True → impede sincronização automática pelo GitHub")
     created_at = Column(DateTime, default=func.now())
 
     company = relationship("Company", back_populates="projects")
