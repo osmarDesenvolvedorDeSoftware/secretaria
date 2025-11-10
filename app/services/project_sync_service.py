@@ -1,12 +1,10 @@
 """Service responsible for synchronising GitHub repositories with projects."""
 
 from __future__ import annotations
-
 import logging
 import time
 from pathlib import Path
 from typing import Dict, Optional
-
 from sqlalchemy.orm import Session
 
 from app.services.llm import generate_text
@@ -29,8 +27,9 @@ if not auto_sync_logger.handlers:
 
 
 def _analyze_context_with_ai(readme_content: str) -> str:
+    """Usa IA (Gemini) para gerar uma descrição curta baseada no README."""
     if not readme_content:
-        return "Nenhum contexto fornecido para análise."
+        return "Projeto de software"
 
     truncated_readme = readme_content[:4000]
     prompt = (
@@ -38,7 +37,7 @@ def _analyze_context_with_ai(readme_content: str) -> str:
         "Tarefa: Analise o conteúdo do arquivo README.md abaixo e gere uma descrição "
         "concisa em português (2-3 frases) sobre o projeto.\n\n"
         "Foco: O que o projeto faz, qual tecnologia principal ele usa e qual problema ele resolve.\n"
-        "Se o README for muito curto ou inútil, apenas diga \"Projeto de software\".\n\n"
+        "Se o README for muito curto ou inútil, apenas diga 'Projeto de software'.\n\n"
         "README:\n---\n"
         f"{truncated_readme}\n---\n\n"
         "Descrição Concisa:"
@@ -47,13 +46,13 @@ def _analyze_context_with_ai(readme_content: str) -> str:
     try:
         ai_description = generate_text(prompt)
         return ai_description.strip() or "Projeto de software"
-    except Exception as exc:  # pragma: no cover
-        logger.error("Erro ao analisar contexto com IA (Gemini): %s", exc)
+    except Exception as exc:
+        logger.error("Erro ao analisar contexto com IA: %s", exc)
         return "Erro ao processar o contexto do projeto."
 
 
 def sync_github_projects_to_db(db: Session, company_id: int) -> Dict[str, object]:
-    """Sincroniza repositórios do GitHub com a tabela `projects`."""
+    """Sincroniza repositórios do GitHub com o banco de dados local."""
     start_time = time.monotonic()
     logger.info("Iniciando sincronização de projetos do GitHub para company_id: %s", company_id)
     auto_sync_logger.info("Iniciando sincronização do GitHub para company_id=%s", company_id)
@@ -61,7 +60,8 @@ def sync_github_projects_to_db(db: Session, company_id: int) -> Dict[str, object
     repos = github_service.fetch_github_projects()
     if not repos:
         duration = time.monotonic() - start_time
-        auto_sync_logger.error("Nenhum repositório retornado pela API. Tempo: %.2fs", duration)
+        logger.warning("Nenhum projeto encontrado ou erro na API do GitHub.")
+        auto_sync_logger.error("Sem projetos para company_id=%s (%.2fs)", company_id, duration)
         return {"status": "error", "message": "Nenhum projeto encontrado ou erro na API."}
 
     new_projects_count = 0
@@ -69,11 +69,12 @@ def sync_github_projects_to_db(db: Session, company_id: int) -> Dict[str, object
 
     for repo in repos:
         repo_name = repo.get("name") or ""
-        repo_url = repo.get("html_url")  # ✅ usa a URL pública
-        owner = repo.get("owner", {}).get("login", "")
+        repo_url = repo.get("url")
+        owner = repo.get("owner_login") or ""
 
+        # Ignora apenas se realmente faltar nome ou dono
         if not repo_name or not owner:
-            logger.debug("Ignorando repositório sem informações suficientes: %s", repo)
+            logger.debug("Ignorando repositório sem nome ou dono: %s", repo)
             continue
 
         existing_project = (
@@ -87,14 +88,12 @@ def sync_github_projects_to_db(db: Session, company_id: int) -> Dict[str, object
 
         logger.info("Processando novo projeto: %s", repo_name)
 
-        try:
-            readme = github_service.fetch_repo_readme(owner=owner, repo_name=repo_name)
-            ai_description: Optional[str] = repo.get("description") or "Projeto sem descrição."
-            if readme:
-                ai_description = _analyze_context_with_ai(readme)
-        except Exception as e:
-            logger.warning("Falha ao processar README de %s: %s", repo_name, e)
-            ai_description = "Projeto de software."
+        readme = github_service.fetch_repo_readme(owner=owner, repo_name=repo_name)
+        if readme:
+            logger.info("Analisando README de %s com IA...", repo_name)
+            ai_description = _analyze_context_with_ai(readme)
+        else:
+            ai_description = repo.get("description") or "Projeto de software"
 
         new_project = Project(
             company_id=company_id,
@@ -105,27 +104,21 @@ def sync_github_projects_to_db(db: Session, company_id: int) -> Dict[str, object
             github_url=repo_url,
         )
 
-        try:
-            db.add(new_project)
-            db.commit()  # ✅ commit individual garante persistência
-            db.refresh(new_project)
-            new_projects_count += 1
-            logger.info("Projeto '%s' salvo no banco de dados.", repo_name)
-        except Exception as e:
-            db.rollback()
-            logger.error("Erro ao salvar projeto %s: %s", repo_name, e)
+        db.add(new_project)
+        new_projects_count += 1
+        logger.info("Projeto '%s' salvo no banco de dados.", repo_name)
+
+    db.commit()
 
     duration = time.monotonic() - start_time
     summary = (
-        "Sincronização concluída. "
-        f"{new_projects_count} novos projetos adicionados. {skipped_count} já existiam."
+        f"Sincronização concluída. {new_projects_count} novos projetos adicionados. "
+        f"{skipped_count} projetos já existentes."
     )
     logger.info(summary)
     auto_sync_logger.info(
-        "Finalizado para company_id=%s em %.2fs (novos=%s, ignorados=%s)",
-        company_id,
-        duration,
-        new_projects_count,
-        skipped_count,
+        "Sincronização finalizada para company_id=%s em %.2fs (novos=%s, ignorados=%s)",
+        company_id, duration, new_projects_count, skipped_count,
     )
+
     return {"status": "success", "summary": summary, "new_projects": new_projects_count}
