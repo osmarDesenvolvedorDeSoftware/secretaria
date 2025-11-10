@@ -46,31 +46,3 @@ def analyze_feedback(feedback: str) -> str:
     sentiment = _detect_sentiment(feedback)
     analysis = FeedbackAnalysis(sentiment=sentiment, summary=feedback)
     return analysis.format()
-
-
-def generate_text(prompt: str) -> str:
-    """Lightweight stand-in for a Gemini text generation request."""
-
-    prompt = prompt or ""
-    sections = prompt.split("---")
-    readme_content = sections[1] if len(sections) >= 3 else prompt
-    readme_content = readme_content.strip()
-
-    if not readme_content:
-        return "Projeto de software"
-
-    lines = [line.strip() for line in readme_content.splitlines() if line.strip()]
-    if not lines:
-        return "Projeto de software"
-
-    summary_lines: list[str] = []
-    for line in lines:
-        summary_lines.append(line)
-        if len(" ".join(summary_lines).split()) >= 40:
-            break
-
-    summary = " ".join(summary_lines)
-    summary = re.sub(r"\s+", " ", summary).strip()
-    if len(summary) > 360:
-        summary = summary[:357].rsplit(" ", 1)[0] + "..."
-    return summary or "Projeto de software"

@@ -7,7 +7,7 @@ from typing import Dict, Optional
 
 from sqlalchemy.orm import Session
 
-from app.integrations.gemini import generate_text
+from app.services.llm import generate_text
 from app.models.project import Project
 from app.services import github_service
 
