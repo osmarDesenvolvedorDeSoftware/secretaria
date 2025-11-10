@@ -406,6 +406,29 @@ Após instalar e criar sua conta:
 
 Agora você precisa configurar o sistema de secretária para se comunicar com o Cal.com.
 
+### Configuração do .env para Cal.com Self-Hosted
+
+Adicione ao seu arquivo `.env`:
+
+```bash
+# URL da API do Cal.com (sua instância self-hosted)
+CAL_API_BASE_URL=https://cal.seudominio.com/api/v1
+
+# Dias de antecedência para buscar disponibilidade
+CAL_DEFAULT_DAYS_AHEAD=7
+```
+
+Depois configure no banco de dados:
+
+```sql
+UPDATE companies 
+SET 
+  cal_api_key = 'cal_live_xxxxxxxxxx',
+  cal_default_user_id = 1,
+  cal_webhook_secret = 'seu-webhook-secret'
+WHERE id = 1;
+```
+
 ### 3.1 Configurar no Banco de Dados
 
 Você precisa adicionar as configurações do Cal.com na tabela `companies` do seu banco de dados.
