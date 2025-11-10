@@ -43,6 +43,7 @@ from app.services.security import detect_prompt_injection, sanitize_for_log, san
 from app.services.tenancy import TenantContext, queue_name_for_company
 from app.services.whaticket import WhaticketClient, WhaticketError
 from app.models import Appointment, Company
+from app.services.chatbot_profile import build_profile_response
 
 
 APPOINTMENT_CONFIRMATION_WORDS = {
@@ -711,7 +712,17 @@ def process_incoming_message(
                 final_message = str(agenda_message)
                 template_vars["resposta"] = final_message
                 llm_status = "agenda_override"
-            elif detect_prompt_injection(sanitized):
+            else:
+                profile_auto_reply = build_profile_response(
+                    user_message,
+                    session_factory,
+                    service.company_id,
+                )
+                if profile_auto_reply:
+                    final_message = profile_auto_reply.strip()
+                    template_vars["resposta"] = final_message
+                    llm_status = "profile_auto_reply"
+            if not final_message and detect_prompt_injection(sanitized):
                 logger.warning("prompt_injection_detected")
                 llm_prompt_injection_blocked_total.labels(
                     company=service.company_label

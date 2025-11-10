@@ -52,11 +52,20 @@ def list_projects():
             return redirect(url_for("admin_projects.list_projects", key=key))
 
         projects = session.query(Project).order_by(asc(Project.name)).all()
+        total_projects = len(projects)
+        locked_projects = sum(1 for project in projects if project.locked)
+        status_totals: dict[str, int] = {}
+        for project in projects:
+            status = project.status or "indefinido"
+            status_totals[status] = status_totals.get(status, 0) + 1
         return render_template(
             "admin/projects_list.html",
             projects=projects,
             key=key,
             status_choices=STATUS_CHOICES,
+            total_projects=total_projects,
+            locked_projects=locked_projects,
+            status_totals=status_totals,
         )
     finally:
         session.close()

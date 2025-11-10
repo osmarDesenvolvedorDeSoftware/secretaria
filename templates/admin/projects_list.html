@@ -1,26 +1,75 @@
 {% extends "base.html" %}
 
 {% block content %}
-  <div class="d-flex justify-content-between align-items-center mb-3">
-    <h2 class="mb-0">Projetos GitHub</h2>
-    <form method="get" action="{{ url_for('admin_projects.list_projects') }}" class="d-none"></form>
+  <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-4">
+    <div>
+      <h2 class="mb-0">Projetos GitHub</h2>
+      <small class="text-muted">Sincronize as informações dos repositórios e controle o que vai para o chatbot.</small>
+    </div>
+    <div class="w-100 w-md-auto">
+      <input type="search" class="form-control" id="project-filter" placeholder="Buscar por nome, cliente ou status...">
+    </div>
   </div>
+
+  <div class="row g-3 mb-4">
+    <div class="col-12 col-md-4">
+      <div class="card border-0 shadow-sm h-100">
+        <div class="card-body">
+          <p class="text-muted text-uppercase small mb-1">Total de projetos</p>
+          <h3 class="mb-0">{{ total_projects }}</h3>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-md-4">
+      <div class="card border-0 shadow-sm h-100">
+        <div class="card-body">
+          <p class="text-muted text-uppercase small mb-1">Projetos bloqueados</p>
+          <h3 class="mb-0">{{ locked_projects }}</h3>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-md-4">
+      <div class="card border-0 shadow-sm h-100">
+        <div class="card-body">
+          <p class="text-muted text-uppercase small mb-2">Status</p>
+          {% if status_totals %}
+            <ul class="list-unstyled mb-0">
+              {% for status, total in status_totals|dictsort %}
+                <li class="d-flex justify-content-between"><span class="text-capitalize">{{ status }}</span><strong>{{ total }}</strong></li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <p class="text-muted mb-0">Ainda não há projetos cadastrados.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
   <form method="post" action="{{ url_for('admin_projects.list_projects', key=key) }}">
     <div class="table-responsive">
-      <table class="table table-striped align-middle">
-        <thead>
+      <table class="table table-hover align-middle" id="projects-table">
+        <thead class="table-light">
           <tr>
             <th>Nome</th>
-            <th>Status</th>
+            <th>Cliente</th>
+            <th style="width: 150px;">Status</th>
             <th class="text-center">Bloqueado</th>
+            <th>Resumo</th>
             <th class="text-end">Ações</th>
           </tr>
         </thead>
         <tbody>
           {% if projects %}
             {% for p in projects %}
-              <tr>
-                <td>{{ p.name }}</td>
+              <tr data-filter-text="{{ (p.name or '')|lower }} {{ (p.client or '')|lower }} {{ (p.status or '')|lower }}">
+                <td>
+                  <div class="fw-semibold">{{ p.name }}</div>
+                  {% if p.github_url %}
+                    <a href="{{ p.github_url }}" target="_blank" rel="noopener" class="small">{{ p.github_url }}</a>
+                  {% endif %}
+                </td>
+                <td>{{ p.client or '—' }}</td>
                 <td>
                   <select class="form-select form-select-sm" name="status_{{ p.id }}">
                     {% for status in status_choices %}
@@ -29,27 +78,58 @@
                   </select>
                 </td>
                 <td class="text-center">
-                  <input class="form-check-input" type="checkbox" name="locked_{{ p.id }}" {% if p.locked %}checked{% endif %}>
-                  <div class="form-text">Impede sincronização automática</div>
+                  <div class="form-check form-switch justify-content-center d-inline-flex">
+                    <input class="form-check-input" type="checkbox" name="locked_{{ p.id }}" {% if p.locked %}checked{% endif %}>
+                  </div>
+                  <small class="text-muted">Impede sincronização automática</small>
+                </td>
+                <td class="small text-muted">
+                  {% if p.description %}
+                    {{ p.description[:160] }}{% if p.description|length > 160 %}...{% endif %}
+                  {% else %}
+                    <em>Sem descrição cadastrada.</em>
+                  {% endif %}
                 </td>
                 <td class="text-end">
-                  <a href="{{ url_for('admin_projects.edit_project', project_id=p.id, key=key) }}" class="btn btn-sm btn-primary">Editar</a>
-                  <button type="button" class="btn btn-sm btn-outline-secondary" onclick="location.href='{{ url_for('admin_projects.toggle_locked', project_id=p.id, key=key) }}'">
-                    Alternar bloqueio
-                  </button>
+                  <div class="btn-group btn-group-sm" role="group">
+                    <a href="{{ url_for('admin_projects.edit_project', project_id=p.id, key=key) }}" class="btn btn-primary">Editar</a>
+                    <a href="{{ url_for('admin_projects.toggle_locked', project_id=p.id, key=key) }}" class="btn btn-outline-secondary">Alternar</a>
+                  </div>
                 </td>
               </tr>
             {% endfor %}
           {% else %}
             <tr>
-              <td colspan="4" class="text-center text-muted py-4">Nenhum projeto encontrado.</td>
+              <td colspan="6" class="text-center text-muted py-4">Nenhum projeto encontrado.</td>
             </tr>
           {% endif %}
         </tbody>
       </table>
     </div>
     <div class="d-flex justify-content-end">
-      <button type="submit" class="btn btn-success">Salvar</button>
+      <button type="submit" class="btn btn-success">Salvar alterações</button>
     </div>
   </form>
+
+  <script>
+    const input = document.getElementById('project-filter');
+    const table = document.getElementById('projects-table');
+    if (input && table) {
+      input.addEventListener('input', function () {
+        const value = this.value.trim().toLowerCase();
+        table.querySelectorAll('tbody tr').forEach((row) => {
+          if (!value) {
+            row.classList.remove('d-none');
+            return;
+          }
+          const text = row.getAttribute('data-filter-text') || '';
+          if (text.includes(value)) {
+            row.classList.remove('d-none');
+          } else {
+            row.classList.add('d-none');
+          }
+        });
+      });
+    }
+  </script>
 {% endblock %}
