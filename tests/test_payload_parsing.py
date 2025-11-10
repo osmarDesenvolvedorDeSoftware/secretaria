@@ -29,7 +29,7 @@ from app.services.payload import extract_number, extract_text_and_kind
                 "message": {
                     "ephemeralMessage": {"message": {"conversation": "Segredo"}}
                 },
-                "number": "11987654321",
+                "number": "5511987654321",
             },
             "Segredo",
             "text",
@@ -188,6 +188,47 @@ def test_extract_text_from_template_buttons():
     assert kind == "template"
 
 
-def test_extract_number_raises_on_missing_data():
-    with pytest.raises(ValueError):
-        extract_number({})
+def test_extract_number_returns_none_on_missing_data():
+    assert extract_number({}) is None
+
+
+def test_extract_number_prefers_remote_jid_alt_over_lid():
+    payload = {
+        "key": {
+            "remoteJid": "122582745514119@lid",
+            "remoteJidAlt": "5516988648203@s.whatsapp.net",
+        }
+    }
+
+    assert extract_number(payload) == "5516988648203"
+
+
+def test_extract_number_uses_participant_for_groups():
+    payload = {
+        "key": {
+            "remoteJid": "5516999999999-123@g.us",
+            "participant": "5516998888888@s.whatsapp.net",
+        }
+    }
+
+    assert extract_number(payload) == "5516998888888"
+
+
+def test_extract_number_uses_participant_for_broadcast():
+    payload = {
+        "key": {
+            "remoteJid": "status@broadcast",
+            "participant": "5516997777777@s.whatsapp.net",
+        }
+    }
+
+    assert extract_number(payload) == "5516997777777"
+
+
+def test_extract_number_uses_regex_fallback():
+    payload = {
+        "message": {"conversation": "Oi"},
+        "meta": {"jid": "5516988888888@s.whatsapp.net"},
+    }
+
+    assert extract_number(payload) == "5516988888888"
