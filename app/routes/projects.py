@@ -402,7 +402,7 @@ def update_project(project_id: int):
     return jsonify({"ok": True, "id": project_id})
 
 
-@bp.post("/projects/sync")
+@bp.post("/sync")
 @require_panel_auth
 def sync_github_projects():
     try:
