@@ -674,6 +674,60 @@ class ContextEngine:
         serialized = json.dumps(self._serialize_profile_dict(payload))
         self.redis.setex(self._profile_key(number), settings.context_ttl, serialized)
 
+    def update_contact_name(self, number: str, name: str) -> None:
+        cleaned = str(name).strip()
+        if not cleaned:
+            return
+
+        session = self._session()
+        payload: dict[str, Any] | None = None
+        try:
+            record = (
+                session.query(CustomerContext)
+                .filter(
+                    CustomerContext.company_id == self.company_id,
+                    CustomerContext.number == number,
+                )
+                .first()
+            )
+            if record is None:
+                record = CustomerContext(
+                    company_id=self.company_id,
+                    number=number,
+                    frequent_topics=[],
+                    product_mentions=[],
+                    preferences={},
+                )
+                session.add(record)
+
+            preferences = dict(record.preferences or {})
+            updated_preferences = dict(preferences)
+            if updated_preferences.get("nome") != cleaned:
+                updated_preferences["nome"] = cleaned
+            if updated_preferences.get("name") != cleaned:
+                updated_preferences["name"] = cleaned
+
+            if updated_preferences != preferences or record.preferences != updated_preferences:
+                record.preferences = updated_preferences
+                session.add(record)
+                session.commit()
+            else:
+                session.flush()
+
+            payload = record.to_dict()
+        except Exception as exc:
+            session.rollback()
+            LOGGER.warning(
+                "contact_name_update_failed",
+                number=number,
+                error=str(exc),
+            )
+        finally:
+            self._close_session(session)
+
+        if payload is not None:
+            self._store_profile(number, payload)
+
     def _load_config(self) -> dict[str, Any]:
         cached = self.redis.get(self._config_key())
         if cached:

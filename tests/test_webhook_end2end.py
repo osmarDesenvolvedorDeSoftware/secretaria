@@ -8,6 +8,7 @@ import hmac
 import pytest
 
 from app.config import settings
+from app.models import CustomerContext
 from tests.conftest import DummyQueue
 
 
@@ -156,3 +157,51 @@ def test_webhook_invalid_payload_returns_400(app, client, monkeypatch):
 
     assert response.status_code == 400
     assert app.task_queue.enqueued == []  # type: ignore[attr-defined]
+
+
+def test_webhook_updates_contact_name(app, client, monkeypatch):
+    app.task_queue = DummyQueue()  # type: ignore[attr-defined]
+    app.dead_letter_queue = DummyQueue()  # type: ignore[attr-defined]
+    app.get_task_queue = lambda _company_id: app.task_queue  # type: ignore[attr-defined]
+    app.get_dead_letter_queue = lambda _company_id: app.dead_letter_queue  # type: ignore[attr-defined]
+    app.task_queue.enqueued.clear()  # type: ignore[attr-defined]
+
+    payload = {
+        "message": {"conversation": "olá"},
+        "number": "5511999999999",
+        "contact": {"name": "Osmar"},
+    }
+    body = json.dumps(payload).encode()
+    ts = 1_700_000_000
+    signature = _sign(ts, body)
+    monkeypatch.setattr(time, "time", lambda: ts + 1)
+
+    response = client.post(
+        "/webhook/whaticket",
+        data=body,
+        headers={
+            "X-Signature": signature,
+            "X-Timestamp": str(ts),
+            "X-Company-Domain": "teste.local",
+        },
+        content_type="application/json",
+    )
+
+    assert response.status_code == 202
+
+    session = app.db_session()  # type: ignore[attr-defined]
+    try:
+        record = (
+            session.query(CustomerContext)
+            .filter(
+                CustomerContext.company_id == 1,
+                CustomerContext.number == "5511999999999",
+            )
+            .first()
+        )
+    finally:
+        session.close()
+
+    assert record is not None
+    assert record.preferences.get("nome") == "Osmar"
+    assert record.preferences.get("name") == "Osmar"

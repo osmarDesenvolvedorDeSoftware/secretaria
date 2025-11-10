@@ -100,6 +100,42 @@ class IncomingWebhook(BaseModel):
         return cls.model_validate(payload)
 
 
+def _extract_contact_name(payload: IncomingWebhook, raw_payload: dict[str, Any]) -> str | None:
+    def _from_mapping(mapping: dict[str, Any] | None) -> list[str]:
+        if not isinstance(mapping, dict):
+            return []
+        candidates: list[str] = []
+        contact = mapping.get("contact")
+        if isinstance(contact, dict):
+            for key in ("name", "pushName", "displayName", "nome"):
+                value = contact.get(key)
+                if isinstance(value, str):
+                    candidates.append(value)
+        for key in ("pushName", "name", "nome"):
+            value = mapping.get(key)
+            if isinstance(value, str):
+                candidates.append(value)
+        message = mapping.get("message")
+        if isinstance(message, dict):
+            for key in ("pushName", "name", "nome"):
+                value = message.get(key)
+                if isinstance(value, str):
+                    candidates.append(value)
+        return candidates
+
+    extras = getattr(payload, "model_extra", {})
+    candidates = []
+    if isinstance(extras, dict):
+        candidates.extend(_from_mapping(extras))
+    candidates.extend(_from_mapping(raw_payload))
+
+    for candidate in candidates:
+        cleaned = str(candidate).strip()
+        if cleaned:
+            return cleaned
+    return None
+
+
 @webhook_bp.post("/whaticket")
 def whaticket_webhook() -> Response:
     start_time = time.time()
@@ -209,6 +245,17 @@ def whaticket_webhook() -> Response:
         billing_service=billing_service,
         analytics_service=analytics_service,
     )
+
+    contact_name = _extract_contact_name(payload, payload_dict)
+    if contact_name:
+        try:
+            service.context_engine.update_contact_name(sanitized_number, contact_name)
+        except Exception as exc:  # pragma: no cover - defensive log
+            LOGGER.warning(
+                "webhook_contact_name_update_failed",
+                number=sanitized_number,
+                error=str(exc),
+            )
 
     correlation_id = (
         request.headers.get("X-Correlation-ID")
