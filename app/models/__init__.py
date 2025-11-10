@@ -10,6 +10,7 @@ from .delivery_log import DeliveryLog
 from .feedback_event import FeedbackEvent
 from .personalization_config import PersonalizationConfig
 from .plan import Plan
+from .profile import Profile
 from .project import Project
 from .scheduling_insights import SchedulingInsights
 from .subscription import Subscription
@@ -27,6 +28,7 @@ __all__ = [
     "FeedbackEvent",
     "PersonalizationConfig",
     "Plan",
+    "Profile",
     "Project",
     "SchedulingInsights",
     "Subscription",

@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h2 class="mb-0">Perfil profissional</h2>
+    <div class="d-flex gap-2">
+      <a href="{{ url_for('admin_projects.list_projects', key=key) }}" class="btn btn-outline-primary btn-sm">Ver projetos</a>
+    </div>
+  </div>
+
+  {% if saved %}
+    <div class="alert alert-success" role="alert">
+      Perfil atualizado com sucesso! As respostas do chatbot já podem usar as novas informações.
+    </div>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('admin_profile.manage_profile', key=key) }}" class="row g-4">
+    <div class="col-12 col-lg-8">
+      <div class="card shadow-sm border-0">
+        <div class="card-body">
+          <h5 class="card-title">Informações principais</h5>
+          <div class="row g-3">
+            <div class="col-md-8">
+              <label class="form-label" for="full_name">Nome completo</label>
+              <input type="text" class="form-control" id="full_name" name="full_name" value="{{ profile.full_name if profile else '' }}" required>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="role">Título profissional</label>
+              <input type="text" class="form-control" id="role" name="role" value="{{ profile.role if profile else '' }}">
+            </div>
+            <div class="col-12">
+              <label class="form-label" for="specialization">Especialização</label>
+              <input type="text" class="form-control" id="specialization" name="specialization" value="{{ profile.specialization if profile else '' }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="experience_years">Anos de experiência</label>
+              <input type="number" min="0" class="form-control" id="experience_years" name="experience_years" value="{{ profile.experience_years if profile and profile.experience_years is not none else '' }}">
+            </div>
+            <div class="col-md-8">
+              <label class="form-label" for="availability">Disponibilidade</label>
+              <input type="text" class="form-control" id="availability" name="availability" value="{{ profile.availability if profile else '' }}">
+            </div>
+            <div class="col-12">
+              <label class="form-label" for="bio">Biografia</label>
+              <textarea class="form-control" id="bio" name="bio" rows="4" placeholder="Conte um pouco sobre você">{{ profile.bio if profile else '' }}</textarea>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card shadow-sm border-0 mt-4">
+        <div class="card-body">
+          <h5 class="card-title">Formação e estudos</h5>
+          <div class="row g-3">
+            <div class="col-12">
+              <label class="form-label" for="education">Formação</label>
+              <textarea class="form-control" id="education" name="education" rows="3" placeholder="Cursos, graduações e especializações">{{ profile.education if profile else '' }}</textarea>
+            </div>
+            <div class="col-12">
+              <label class="form-label" for="current_studies">Estudos atuais</label>
+              <textarea class="form-control" id="current_studies" name="current_studies" rows="3" placeholder="O que você está estudando agora">{{ profile.current_studies if profile else '' }}</textarea>
+            </div>
+            <div class="col-12">
+              <label class="form-label" for="certifications">Certificações e conquistas</label>
+              <textarea class="form-control" id="certifications" name="certifications" rows="3" placeholder="Certificados relevantes">{{ profile.certifications if profile else '' }}</textarea>
+            </div>
+            <div class="col-12">
+              <label class="form-label" for="languages">Idiomas</label>
+              <input type="text" class="form-control" id="languages" name="languages" value="{{ profile.languages if profile else '' }}">
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-12 col-lg-4">
+      <div class="card shadow-sm border-0">
+        <div class="card-body">
+          <h5 class="card-title">Presença digital</h5>
+          <div class="mb-3">
+            <label class="form-label" for="website">Site pessoal</label>
+            <input type="url" class="form-control" id="website" name="website" value="{{ profile.website if profile else '' }}" placeholder="https://">
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="github_url">GitHub</label>
+            <input type="url" class="form-control" id="github_url" name="github_url" value="{{ profile.github_url if profile else '' }}" placeholder="https://github.com/...">
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="linkedin_url">LinkedIn</label>
+            <input type="url" class="form-control" id="linkedin_url" name="linkedin_url" value="{{ profile.linkedin_url if profile else '' }}" placeholder="https://linkedin.com/in/...">
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="email">E-mail profissional</label>
+            <input type="email" class="form-control" id="email" name="email" value="{{ profile.email if profile else '' }}" placeholder="nome@dominio.com">
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="avatar_url">URL do avatar</label>
+            <input type="url" class="form-control" id="avatar_url" name="avatar_url" value="{{ profile.avatar_url if profile else '' }}" placeholder="https://">
+          </div>
+          {% if profile and profile.avatar_url %}
+            <div class="text-center">
+              <img src="{{ profile.avatar_url }}" alt="Avatar" class="img-fluid rounded-circle shadow-sm" style="max-width: 140px;">
+            </div>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="card shadow-sm border-0 mt-4">
+        <div class="card-body">
+          <h5 class="card-title">Resumo rápido</h5>
+          <p class="text-muted small mb-2">Estas informações são usadas para respostas rápidas do chatbot.</p>
+          <ul class="list-unstyled small mb-0">
+            <li><strong>Atualizado em:</strong> {{ profile.updated_at.strftime('%d/%m/%Y %H:%M') if profile and profile.updated_at else '—' }}</li>
+            <li><strong>Disponibilidade:</strong> {{ profile.availability if profile else '—' }}</li>
+            <li><strong>Anos de experiência:</strong> {{ profile.experience_years if profile and profile.experience_years is not none else '—' }}</li>
+            <li><strong>Idiomas:</strong> {{ profile.languages if profile else '—' }}</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-12">
+      <div class="d-flex justify-content-end gap-2">
+        <a href="{{ url_for('admin_projects.list_projects', key=key) }}" class="btn btn-outline-secondary">Cancelar</a>
+        <button type="submit" class="btn btn-primary">Salvar alterações</button>
+      </div>
+    </div>
+  </form>
+{% endblock %}

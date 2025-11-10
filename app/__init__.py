@@ -337,6 +337,7 @@ def init_app() -> Flask:
     from app.routes.recommendations import recommendation_bp
     from app.routes.projects import bp as projects_bp
     from app.routes.admin_projects import bp as admin_projects_bp
+    from app.routes.admin_profile import bp as admin_profile_bp
     from app.routes.agenda import agenda_bp
 
     app.register_blueprint(health_bp)
@@ -349,6 +350,7 @@ def init_app() -> Flask:
     app.register_blueprint(projects_bp)
     app.register_blueprint(agenda_bp)
     app.register_blueprint(admin_projects_bp)
+    app.register_blueprint(admin_profile_bp)
 
     return app
 
