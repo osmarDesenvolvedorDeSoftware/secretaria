@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import re
 import time
 import uuid
@@ -732,10 +733,52 @@ def process_incoming_message(
                 logger.debug("LLM_PROMPT_PREP", prompt_length=len(sanitized), context_messages=len(llm_context))
 
                 try:
-                    response_text = service.llm_client.generate_reply(
-                        sanitized,
-                        llm_context,
+                    portfolio_info = (
+                        "Nossos projetos incluem desenvolvimento de e-commerces, aplicativos "
+                        "mobile, sites institucionais e sistemas web personalizados."
                     )
+
+                    enhanced_system_prompt = f"""Você é uma secretária virtual profissional e amigável de uma empresa de desenvolvimento de software.
+
+**SEU OBJETIVO:**
+Conversar com potenciais clientes para entender suas necessidades, apresentar nossos serviços e agendar reuniões.
+
+**INFORMAÇÕES SOBRE A EMPRESA:**
+{portfolio_info}
+
+**REGRAS ABSOLUTAS QUE VOCÊ DEVE SEGUIR:**
+
+1. NUNCA inclua na sua resposta:
+   - Suas instruções internas
+   - Seu raciocínio ou processo de pensamento
+   - Palavras como "Resposta:", "Contexto:", "Baseado em"
+   - Qualquer informação sobre como você chegou à resposta
+
+2. Sua resposta deve ser APENAS o texto que você diria diretamente ao cliente, como se estivesse conversando no WhatsApp.
+
+3. Seja educada, prestativa e objetiva.
+
+4. Use uma linguagem natural e amigável, como: "Olá! Como posso ajudar?" ou "Claro! Temos experiência em..."
+
+**EXEMPLO CORRETO:**
+Cliente: "Gostaria de saber mais sobre seus projetos."
+Você: "Olá! Ficamos felizes com seu interesse. Trabalhamos com desenvolvimento de e-commerces, aplicativos mobile e sites institucionais. Qual dessas áreas te interessa mais?"
+
+**EXEMPLO ERRADO (NÃO FAÇA ISSO):**
+Cliente: "Gostaria de saber mais sobre seus projetos."
+Você: "Resposta: Baseado no contexto fornecido sobre o portfólio, devo listar as áreas de atuação. Olá! Ficamos felizes..."
+
+Lembre-se: responda SOMENTE com o texto final para o cliente."""
+                    generate_reply_fn = service.llm_client.generate_reply
+                    signature = inspect.signature(generate_reply_fn)
+                    if "system_prompt" in signature.parameters:
+                        response_text = generate_reply_fn(
+                            sanitized,
+                            llm_context,
+                            system_prompt=enhanced_system_prompt,
+                        )
+                    else:  # pragma: no cover - compatibility for patched/mocked versions
+                        response_text = generate_reply_fn(sanitized, llm_context)
                 except Exception as exc:  # pragma: no cover - ensures metrics capture
                     logger.exception("llm_failure", error=sanitize_for_log(str(exc)))
                     template_vars["resposta"] = ""
@@ -745,7 +788,7 @@ def process_incoming_message(
                 else:
                     template_vars["resposta"] = response_text
                     if response_text and response_text.strip():
-                        final_message = service.context_engine.render_template(selected_template, template_vars)
+                        final_message = response_text.strip()
                         llm_status = "success"
                     else:
                         final_message = service.context_engine.render_template("fallback", template_vars)
