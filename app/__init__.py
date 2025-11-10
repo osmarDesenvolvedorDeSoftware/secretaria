@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import atexit
 import logging
 import logging.config
 import os
@@ -18,6 +19,9 @@ from rq import Queue, Worker
 from sqlalchemy import create_engine
 from sqlalchemy.orm import scoped_session, sessionmaker
 
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.interval import IntervalTrigger
+
 from .config import settings
 from .metrics import (
     active_workers_gauge,
@@ -34,6 +38,7 @@ from .metrics import (
 )
 from .services.analytics_service import AnalyticsService
 from .services.billing import BillingService
+from .services import project_sync_service
 from .services.scheduler_service import SchedulerService
 from .services.tenancy import (
     build_tenant_context,
@@ -146,6 +151,44 @@ def init_app() -> Flask:
         scheduler_service.ensure_daily_agenda_optimization()
     except Exception:
         LOGGER.warning("scheduler_initialization_failed")
+
+    if settings.internal_sync_mode:
+        app.github_auto_sync_scheduler = None  # type: ignore[attr-defined]
+        scheduler_logger = LOGGER.bind(job="github_auto_sync")
+
+        def _run_github_auto_sync() -> None:
+            session = SessionLocal()
+            try:
+                result = project_sync_service.sync_github_projects_to_db(
+                    session,
+                    settings.default_company_id,
+                )
+                scheduler_logger.info(
+                    "github_auto_sync_result",
+                    status=result.get("status"),
+                    summary=result.get("summary"),
+                )
+            except Exception:
+                scheduler_logger.exception("github_auto_sync_failed")
+            finally:
+                try:
+                    session.close()
+                finally:
+                    SessionLocal.remove()
+
+        try:
+            github_scheduler = BackgroundScheduler()
+            github_scheduler.add_job(
+                _run_github_auto_sync,
+                IntervalTrigger(hours=max(1, settings.sync_interval_hours)),
+                id="github_auto_sync",
+                replace_existing=True,
+            )
+            github_scheduler.start()
+            atexit.register(lambda: github_scheduler.shutdown(wait=False))
+            app.github_auto_sync_scheduler = github_scheduler  # type: ignore[attr-defined]
+        except Exception:
+            scheduler_logger.error("github_auto_sync_scheduler_failed", exc_info=True)
 
     @app.teardown_appcontext
     def remove_session(exception: Exception | None) -> None:
