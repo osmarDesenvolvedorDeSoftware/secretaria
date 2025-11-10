@@ -15,6 +15,7 @@ class Project(Base):
     client = Column(String(100))
     description = Column(Text)
     status = Column(String(50), default="ativo")
+    github_url = Column(String(255))
     created_at = Column(DateTime, default=func.now())
 
     company = relationship("Company", back_populates="projects")

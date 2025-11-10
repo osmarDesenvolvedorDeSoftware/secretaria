@@ -43,6 +43,8 @@ class Config:
     whaticket_jwt_password: Optional[str] = os.getenv("WHATICKET_JWT_PASSWORD")
     gemini_api_key: str = os.getenv("GEMINI_API_KEY", "")
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
+    github_pat: str = os.getenv("GITHUB_PAT", "")
+    github_username: str = os.getenv("GITHUB_USERNAME", "")
     embedding_provider: str = os.getenv("EMBEDDING_PROVIDER", "gemini")
     redis_url: str = os.getenv("REDIS_URL", "redis://redis:6379/0")
     database_url: str = os.getenv("DATABASE_URL", "postgresql+psycopg2://postgres:postgres@postgres:5432/postgres")
