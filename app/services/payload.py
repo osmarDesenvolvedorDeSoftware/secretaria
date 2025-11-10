@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import re
 from typing import Any, Tuple
 
 
@@ -15,28 +17,51 @@ _MESSAGE_KINDS = {
     "documentMessage": "media",
 }
 
+logger = logging.getLogger(__name__)
+
+
+def _normalize_candidate(value: Any) -> str | None:
+    if not value:
+        return None
+
+    raw = str(value)
+    logger.debug("extract_number candidate before normalization: %s", raw)
+
+    main_part = raw.split("@", 1)[0]
+    digits = re.sub(r"\D", "", main_part)
+
+    logger.debug(
+        "extract_number candidate after normalization: %s", digits or "<empty>"
+    )
+
+    if len(digits) < 11:
+        return None
+
+    return digits
+
 
 def extract_number(payload: dict[str, Any]) -> str:
     """Extract and normalize the WhatsApp number from the payload."""
+    key_payload = payload.get("key", {}) if isinstance(payload.get("key"), dict) else {}
+
     candidates = [
+        key_payload.get("remoteJidAlt"),
+        key_payload.get("remoteJid"),
+        payload.get("remoteJidAlt"),
+        payload.get("remoteJid"),
         payload.get("from"),
         payload.get("number"),
-        payload.get("remoteJid"),
-        payload.get("key", {}).get("remoteJid"),
         payload.get("contact", {}).get("number"),
         payload.get("contact", {}).get("phone"),
         payload.get("ticket", {}).get("contact", {}).get("number"),
         payload.get("ticket", {}).get("contact", {}).get("phone"),
     ]
+
     for candidate in candidates:
-        if not candidate:
-            continue
-        digits = "".join(ch for ch in str(candidate) if ch.isdigit())
-        if not digits:
-            continue
-        if not digits.startswith("55"):
-            digits = "55" + digits
-        return digits
+        normalized = _normalize_candidate(candidate)
+        if normalized:
+            return normalized
+
     raise ValueError("could not extract whatsapp number")
 
 
