@@ -722,7 +722,7 @@ def process_incoming_message(
                     llm_context = service.context_engine.build_llm_context(runtime_context)
 
                     try:
-                        response_text = service.llm.generate_reply(
+                        response_text = service.llm_client.generate_reply(
                             text=user_message,
                             context=llm_context,
                             system_prompt=rag_context["system_prompt"]
