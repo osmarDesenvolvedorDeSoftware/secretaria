@@ -748,7 +748,7 @@ def process_incoming_message(
                 final_message = service.context_engine.render_template("ai_disabled", template_vars)
                 fallback_transfers_total.labels(company=service.company_label).inc()
                 llm_status = "ai_disabled"
-            else:
+            elif not final_message:
                 response_text = ""
                 llm_status = "started"
                 
