@@ -7,10 +7,13 @@ from __future__ import annotations
 import re
 from typing import Any
 
+import structlog
 from sqlalchemy.orm import Session
 
 from app.models.profile import Profile
 from app.models.project import Project
+
+logger = structlog.get_logger()
 
 # --- Constantes de Intenção ---
 
@@ -50,18 +53,50 @@ def detect_intent(message: str) -> str | None:
     normalized_msg = _normalize_text(message)
     tokens = set(normalized_msg.split())
 
+    # LOG ADICIONADO: Debug da detecção de intenção
+    logger.info(
+        "detect_intent_debug",
+        original_message=message,
+        normalized=normalized_msg,
+        tokens=list(tokens),
+    )
+
     # Verifica se contém variações de "desenvolvedor" (tolera erros de digitação)
     if any(variant in normalized_msg for variant in ["desenvolvedor", "desevovledor", "desenvolvedor"]):
+        logger.info("detect_intent_result", intent="profile", reason="desenvolvedor_found")
         return "profile"
 
     # Verifica palavras-chave de perfil
-    if any(keyword in normalized_msg or keyword in tokens for keyword in PROFILE_KEYWORDS):
+    profile_matches = [
+        keyword
+        for keyword in PROFILE_KEYWORDS
+        if keyword in normalized_msg or keyword in tokens
+    ]
+    if profile_matches:
+        logger.info(
+            "detect_intent_result",
+            intent="profile",
+            reason="profile_keywords",
+            matches=profile_matches,
+        )
         return "profile"
 
     # Verifica palavras-chave de projetos
-    if any(keyword in normalized_msg or keyword in tokens for keyword in PROJECT_KEYWORDS):
+    project_matches = [
+        keyword
+        for keyword in PROJECT_KEYWORDS
+        if keyword in normalized_msg or keyword in tokens
+    ]
+    if project_matches:
+        logger.info(
+            "detect_intent_result",
+            intent="projects",
+            reason="project_keywords",
+            matches=project_matches,
+        )
         return "projects"
 
+    logger.info("detect_intent_result", intent=None, reason="no_match")
     return None
 
 # --- Funções de Recuperação de Dados (Retrieval) ---
@@ -70,6 +105,7 @@ def get_profile_context(session: Session) -> str:
     '''Busca o perfil do desenvolvedor no banco e formata como um texto de contexto.'''
     profile = session.query(Profile).order_by(Profile.updated_at.desc()).first()
     if not profile:
+        logger.warning("get_profile_context", result="no_profile_found")
         return "Nenhuma informação de perfil de desenvolvedor encontrada no banco de dados."
 
     context_parts = []
@@ -100,12 +136,19 @@ def get_profile_context(session: Session) -> str:
     if profile.linkedin_url:
         context_parts.append(f"LinkedIn: {profile.linkedin_url}")
 
-    return "\n".join(context_parts)
+    result = "\n".join(context_parts)
+    logger.info("get_profile_context", result="success", fields_count=len(context_parts))
+    return result
 
 def get_projects_context(session: Session, company_id: int) -> str:
     '''Busca os projetos no banco e formata como um texto de contexto.'''
     projects = session.query(Project).filter_by(company_id=company_id).order_by(Project.created_at.desc()).limit(10).all()
     if not projects:
+        logger.warning(
+            "get_projects_context",
+            result="no_projects_found",
+            company_id=company_id,
+        )
         return "Nenhum projeto encontrado no banco de dados para esta empresa."
 
     project_lines = []
@@ -121,7 +164,14 @@ def get_projects_context(session: Session, company_id: int) -> str:
             project_info += f"\nRepositório: {p.github_url}"
         project_lines.append(project_info)
 
-    return "\n\n".join(project_lines)
+    result = "\n\n".join(project_lines)
+    logger.info(
+        "get_projects_context",
+        result="success",
+        projects_count=len(projects),
+        company_id=company_id,
+    )
+    return result
 
 # --- Função Principal de Geração de Contexto para o LLM ---
 
@@ -141,8 +191,12 @@ def build_rag_context(
     Returns:
         Dicionário com system_prompt enriquecido e status, ou None se não detectar intenção
     '''
+    # LOG ADICIONADO: Início do fluxo RAG
+    logger.info("build_rag_context_start", message=message, company_id=company_id)
+
     intent = detect_intent(message)
     if not intent:
+        logger.info("build_rag_context_end", result="no_intent_detected")
         return None
 
     session = session_factory()
@@ -159,6 +213,11 @@ Responda à pergunta do usuário sobre o desenvolvedor usando EXCLUSIVAMENTE as 
 Seja amigável, profissional e natural na resposta.
 Se alguma informação não estiver disponível no contexto, diga que não tem essa informação no momento.
 '''.strip()
+            logger.info(
+                "build_rag_context_end",
+                result="profile_rag_created",
+                context_length=len(context_data),
+            )
             return {"system_prompt": system_prompt, "status": "profile_rag"}
 
         if intent == "projects":
@@ -173,11 +232,17 @@ Responda à pergunta do usuário sobre os projetos usando EXCLUSIVAMENTE as info
 Liste os projetos de forma clara e organizada.
 Seja profissional e destaque os pontos fortes de cada projeto.
 '''.strip()
+            logger.info(
+                "build_rag_context_end",
+                result="projects_rag_created",
+                context_length=len(context_data),
+            )
             return {"system_prompt": system_prompt, "status": "projects_rag"}
 
     finally:
         session.close()
 
+    logger.info("build_rag_context_end", result="no_context_created")
     return None
 
 
